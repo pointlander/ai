@@ -17,6 +17,11 @@ import (
 	"gonum.org/v1/plot/vg/draw"
 )
 
+const (
+	// HiddenSize is the number of hidden units
+	HiddenSize = 32
+)
+
 // Statistics captures statistics
 type Statistics struct {
 	Sum        float64
@@ -71,10 +76,10 @@ func main() {
 	}
 
 	set := tf32.NewSet()
-	set.Add("query", 4, 4)
-	set.Add("key", 4, 4)
-	set.Add("value", 4, 4)
-	set.Add("project", 4, 4)
+	set.Add("query", 4, HiddenSize)
+	set.Add("key", 4, HiddenSize)
+	set.Add("value", 4, HiddenSize)
+	set.Add("project", HiddenSize, 4)
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
