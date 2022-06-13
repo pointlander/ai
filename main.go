@@ -101,7 +101,7 @@ func main() {
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
 	cost := tf32.Avg(tf32.Quadratic(transformer, others.Get("output")))
 
-	alpha, eta, iterations := float32(.1), float32(.1), 300
+	alpha, eta, iterations := float32(.01), float32(.01), 1024
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
