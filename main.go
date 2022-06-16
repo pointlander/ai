@@ -5,6 +5,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math"
 	"math/rand"
@@ -17,9 +18,8 @@ import (
 	"gonum.org/v1/plot/vg/draw"
 )
 
-const (
-	// HiddenSize is the number of hidden units
-	HiddenSize = 32
+var (
+	FlagIris = flag.Bool("iris", false, "Iris mode")
 )
 
 // Statistics captures statistics
@@ -53,6 +53,15 @@ func (s Statistics) String() string {
 }
 
 func main() {
+	flag.Parse()
+
+	if *FlagIris {
+		Iris(32)
+		return
+	}
+}
+
+func Iris(hiddenSize int) {
 	rnd := rand.New(rand.NewSource(1))
 	datum, err := iris.Load()
 	if err != nil {
@@ -76,10 +85,10 @@ func main() {
 	}
 
 	set := tf32.NewSet()
-	set.Add("query", 4, HiddenSize)
-	set.Add("key", 4, HiddenSize)
-	set.Add("value", 4, HiddenSize)
-	set.Add("project", HiddenSize, 4)
+	set.Add("query", 4, hiddenSize)
+	set.Add("key", 4, hiddenSize)
+	set.Add("value", 4, hiddenSize)
+	set.Add("project", hiddenSize, 4)
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
