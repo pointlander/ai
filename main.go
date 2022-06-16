@@ -5,10 +5,13 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"strings"
 
 	"github.com/pointlander/datum/iris"
 	"github.com/pointlander/gradient/tf32"
@@ -21,6 +24,8 @@ import (
 var (
 	// FlagIris is a flag to run the Iris dataset
 	FlagIris = flag.Bool("iris", false, "Iris mode")
+	// FlagTranslate is a flag to run the translation for english to german
+	FlagTranslate = flag.Bool("translate", false, "Translate mode")
 )
 
 // Statistics captures statistics
@@ -59,6 +64,46 @@ func main() {
 	if *FlagIris {
 		Iris(32)
 		return
+	} else if *FlagTranslate {
+		Translate(32)
+		return
+	}
+}
+
+// Translate translates english to german
+func Translate(hiddenSize int) {
+	englishIn, err := os.Open("europarl-v7.de-en.en")
+	if err != nil {
+		panic(err)
+	}
+	defer englishIn.Close()
+	englishReader := bufio.NewReader(englishIn)
+	english := make([]string, 0, 8)
+	for {
+		line, err := englishReader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		english = append(english, strings.TrimSpace(line))
+	}
+
+	germanIn, err := os.Open("europarl-v7.de-en.de")
+	if err != nil {
+		panic(err)
+	}
+	defer germanIn.Close()
+	germanReader := bufio.NewReader(germanIn)
+	german := make([]string, 0, 8)
+	for {
+		line, err := germanReader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		german = append(german, strings.TrimSpace(line))
+	}
+
+	if len(english) != len(german) {
+		panic("unequal length")
 	}
 }
 
