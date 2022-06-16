@@ -19,6 +19,7 @@ import (
 )
 
 var (
+	// FlagIris is a flag to run the Iris dataset
 	FlagIris = flag.Bool("iris", false, "Iris mode")
 )
 
@@ -61,6 +62,7 @@ func main() {
 	}
 }
 
+// Iris is the iris dataset
 func Iris(hiddenSize int) {
 	rnd := rand.New(rand.NewSource(1))
 	datum, err := iris.Load()
