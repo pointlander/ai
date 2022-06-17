@@ -70,6 +70,23 @@ func main() {
 	}
 }
 
+// PositionEncoding add position encoding to vector
+func PositionEncoding(input *tf32.V) {
+	length, d, t := len(input.X), input.S[0], 0.0
+	for i := 0; i < length; i += d {
+		k := 0.0
+		for j := 0; j < d; j++ {
+			if j&1 == 0 {
+				input.X[i+j] += float32(math.Sin(math.Pow(10000, -2*k/float64(d)) * t))
+			} else {
+				input.X[i+j] += float32(math.Cos(math.Pow(10000, -2*k/float64(d)) * t))
+				k++
+			}
+		}
+		t++
+	}
+}
+
 // Translate translates english to german
 func Translate(hiddenSize int) {
 	englishIn, err := os.Open("europarl-v7.de-en.en")
@@ -130,6 +147,7 @@ func Iris(hiddenSize int) {
 			}
 		}
 	}
+	PositionEncoding(others.Weights[0])
 
 	set := tf32.NewSet()
 	set.Add("query", 4, hiddenSize)
@@ -157,7 +175,7 @@ func Iris(hiddenSize int) {
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
 	cost := tf32.Avg(tf32.Quadratic(transformer, others.Get("output")))
 
-	alpha, eta, iterations := float32(.01), float32(.01), 1024
+	alpha, eta, iterations := float32(.01), float32(.01), 2048
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
