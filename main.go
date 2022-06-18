@@ -110,9 +110,9 @@ func TranslateToGerman(size int, english []byte) {
 	query := tf32.Mul(set.Get("query"), others.Get("input"))
 	key := tf32.Mul(set.Get("key"), others.Get("input"))
 	value := tf32.Mul(set.Get("value"), others.Get("input"))
-	transformer := tf32.Mul(set.Get("project"),
+	transformer := tf32.Softmax(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
-			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
+			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
 
 	for j := range input.X {
 		input.X[j] = 0
@@ -134,6 +134,7 @@ func TranslateToGerman(size int, english []byte) {
 			max, symbol := float32(0.0), 0
 			for j := 0; j < 256; j++ {
 				if s := a.X[i+j]; s > max {
+					fmt.Println(i+j, s, symbol)
 					max, symbol = s, j
 				}
 			}
@@ -222,9 +223,9 @@ func Translate(size, hiddenSize int) {
 	query := tf32.Mul(set.Get("query"), others.Get("input"))
 	key := tf32.Mul(set.Get("key"), others.Get("input"))
 	value := tf32.Mul(set.Get("value"), others.Get("input"))
-	transformer := tf32.Mul(set.Get("project"),
+	transformer := tf32.Softmax(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
-			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
+			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
 	cost := tf32.Avg(tf32.Quadratic(transformer, others.Get("output")))
 
 	c, halt := make(chan os.Signal), false
