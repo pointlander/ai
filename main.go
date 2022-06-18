@@ -316,6 +316,9 @@ func Translate(size, hiddenSize int) {
 		if halt {
 			break
 		}
+		if i%1000 == 0 {
+			set.Save(fmt.Sprintf("%d_set.w", i), total, i)
+		}
 	}
 
 	p := plot.New()
