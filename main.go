@@ -28,6 +28,8 @@ var (
 	FlagIris = flag.Bool("iris", false, "Iris mode")
 	// FlagTranslate is a flag to run the translation for english to german
 	FlagTranslate = flag.Bool("translate", false, "Translate mode")
+	// FlagGerman translate english to german
+	FlagGerman = flag.String("german", "", "translate english to german")
 )
 
 // Statistics captures statistics
@@ -67,7 +69,10 @@ func main() {
 		Iris(32)
 		return
 	} else if *FlagTranslate {
-		Translate(4096, 256)
+		Translate(4096, 1024)
+		return
+	} else if *FlagGerman != "" {
+		TranslateToGerman(4096, []byte(*FlagGerman))
 		return
 	}
 }
@@ -87,6 +92,58 @@ func PositionEncoding(input *tf32.V) {
 		}
 		t++
 	}
+}
+
+// TranslateToGerman translates english to german
+func TranslateToGerman(size int, english []byte) {
+	others := tf32.NewSet()
+	others.Add("input", 256, 2*size)
+	input := others.Weights[0]
+	input.X = input.X[:cap(input.X)]
+
+	set := tf32.NewSet()
+	_, _, err := set.Open("set.w")
+	if err != nil {
+		panic(err)
+	}
+
+	query := tf32.Mul(set.Get("query"), others.Get("input"))
+	key := tf32.Mul(set.Get("key"), others.Get("input"))
+	value := tf32.Mul(set.Get("value"), others.Get("input"))
+	transformer := tf32.Mul(set.Get("project"),
+		tf32.Hadamard(tf32.Sigmoid(query),
+			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
+
+	for j := range input.X {
+		input.X[j] = 0
+	}
+	j := 0
+	for _, value := range english {
+		input.X[256*j+int(value)] = 1
+		j++
+	}
+	for j < size {
+		input.X[256*j+int(byte(' '))] = 1
+		j++
+	}
+	PositionEncoding(input)
+
+	transformer(func(a *tf32.V) bool {
+		output := make([]byte, 0, 2*size)
+		for i := 0; i < 2*size; i += 256 {
+			max, symbol := float32(0.0), 0
+			for j := 0; j < 256; j++ {
+				if s := a.X[i+j]; s > max {
+					max, symbol = s, j
+				}
+			}
+			if symbol != 0 {
+				output = append(output, byte(symbol))
+			}
+		}
+		fmt.Println(string(output))
+		return true
+	})
 }
 
 // Translate translates english to german
@@ -170,15 +227,14 @@ func Translate(size, hiddenSize int) {
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
 	cost := tf32.Avg(tf32.Quadratic(transformer, others.Get("output")))
 
-	c := make(chan os.Signal)
+	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		set.Save("set.w", 0, 0)
-		os.Exit(0)
+		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.01), float32(.01), 2048
+	alpha, eta, iterations := float32(.0001), float32(.0001), 2048
 	points := make(plotter.XYs, 0, iterations)
 	for i, in := range english {
 		out := german[i]
@@ -256,6 +312,9 @@ func Translate(size, hiddenSize int) {
 		/*if total < .1 {
 			break
 		}*/
+		if halt {
+			break
+		}
 	}
 
 	p := plot.New()
