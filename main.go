@@ -69,7 +69,7 @@ func main() {
 		Iris(32)
 		return
 	} else if *FlagTranslate {
-		Translate(4096, 4096)
+		Translate(4096, 1024)
 		return
 	} else if *FlagGerman != "" {
 		TranslateToGerman(4096, []byte(*FlagGerman))
@@ -115,7 +115,6 @@ func Quadratic(k tf32.Continuation, a, b *tf32.V) bool {
 	for i, ax := range a.X {
 		a.D[i] += (ax - b.X[i]) * d
 		b.D[i] += (b.X[i] - ax) * d
-
 	}
 	return false
 }
@@ -136,10 +135,16 @@ func TranslateToGerman(size int, english []byte) {
 	query := tf32.Mul(set.Get("query"), others.Get("input"))
 	key := tf32.Mul(set.Get("key"), others.Get("input"))
 	value := tf32.Mul(set.Get("value"), others.Get("input"))
-	transformer := tf32.Softmax(tf32.Mul(set.Get("project"),
+	transformer := tf32.Sigmoid(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
 
+	query1 := tf32.Mul(set.Get("query1"), transformer)
+	key1 := tf32.Mul(set.Get("key1"), transformer)
+	value1 := tf32.Mul(set.Get("value1"), transformer)
+	transformer1 := tf32.Softmax(tf32.Mul(set.Get("project1"),
+		tf32.Hadamard(tf32.Sigmoid(query1),
+			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key1), value1)))))
 	for j := range input.X {
 		input.X[j] = 0
 	}
@@ -154,7 +159,7 @@ func TranslateToGerman(size int, english []byte) {
 	}
 	PositionEncoding(input)
 
-	transformer(func(a *tf32.V) bool {
+	transformer1(func(a *tf32.V) bool {
 		output := make([]byte, 0, 2*size)
 		for i := 0; i < 2*size; i++ {
 			max, symbol := float32(0.0), 0
@@ -230,7 +235,11 @@ func Translate(size, hiddenSize int) {
 	set.Add("query", 256, hiddenSize)
 	set.Add("key", 256, hiddenSize)
 	set.Add("value", 256, hiddenSize)
-	set.Add("project", hiddenSize, 256)
+	set.Add("project", hiddenSize, hiddenSize)
+	set.Add("query1", hiddenSize, hiddenSize)
+	set.Add("key1", hiddenSize, hiddenSize)
+	set.Add("value1", hiddenSize, hiddenSize)
+	set.Add("project1", hiddenSize, 256)
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
@@ -249,10 +258,18 @@ func Translate(size, hiddenSize int) {
 	query := tf32.Mul(set.Get("query"), others.Get("input"))
 	key := tf32.Mul(set.Get("key"), others.Get("input"))
 	value := tf32.Mul(set.Get("value"), others.Get("input"))
-	transformer := tf32.Softmax(tf32.Mul(set.Get("project"),
+	transformer := tf32.Sigmoid(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
-	cost := quadratic(transformer, others.Get("output"))
+
+	query1 := tf32.Mul(set.Get("query1"), transformer)
+	key1 := tf32.Mul(set.Get("key1"), transformer)
+	value1 := tf32.Mul(set.Get("value1"), transformer)
+	transformer1 := tf32.Softmax(tf32.Mul(set.Get("project1"),
+		tf32.Hadamard(tf32.Sigmoid(query1),
+			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key1), value1)))))
+
+	cost := quadratic(transformer1, others.Get("output"))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -261,7 +278,7 @@ func Translate(size, hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.001), float32(.001), 2048
+	alpha, eta, iterations := float32(.0001), float32(.0001), 2048
 	points := make(plotter.XYs, 0, iterations)
 	for i, in := range english {
 		out := german[i]
@@ -411,13 +428,15 @@ func Iris(hiddenSize int) {
 		deltas = append(deltas, make([]float32, len(p.X)))
 	}
 
+	quadratic := tf32.B(Quadratic)
+
 	query := tf32.Mul(set.Get("query"), others.Get("input"))
 	key := tf32.Mul(set.Get("key"), others.Get("input"))
 	value := tf32.Mul(set.Get("value"), others.Get("input"))
 	transformer := tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
-	cost := tf32.Avg(tf32.Quadratic(transformer, others.Get("output")))
+	cost := quadratic(transformer, others.Get("output"))
 
 	alpha, eta, iterations := float32(.01), float32(.01), 2048
 	points := make(plotter.XYs, 0, iterations)
