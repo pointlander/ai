@@ -94,6 +94,32 @@ func PositionEncoding(input *tf32.V) {
 	}
 }
 
+// Quadratic computes the quadratic cost of two tensors
+func Quadratic(k tf32.Continuation, a, b *tf32.V) bool {
+	if len(a.S) != 2 || len(b.S) != 2 {
+		panic("tensor needs to have two dimensions")
+	}
+	if a.S[0] != b.S[0] || a.S[1] != b.S[1] {
+		panic("dimensions are not the same")
+	}
+	c, sum := tf32.NewV(1), float32(0.0)
+	for i, ax := range a.X {
+		p := (ax - b.X[i])
+		sum += p * p
+	}
+	c.X = append(c.X, .5*sum)
+	if k(&c) {
+		return true
+	}
+	d := c.D[0]
+	for i, ax := range a.X {
+		a.D[i] += (ax - b.X[i]) * d
+		b.D[i] += (b.X[i] - ax) * d
+
+	}
+	return false
+}
+
 // TranslateToGerman translates english to german
 func TranslateToGerman(size int, english []byte) {
 	others := tf32.NewSet()
@@ -102,7 +128,7 @@ func TranslateToGerman(size int, english []byte) {
 	input.X = input.X[:cap(input.X)]
 
 	set := tf32.NewSet()
-	_, _, err := set.Open("set.w")
+	_, _, err := set.Open("3000_set.w")
 	if err != nil {
 		panic(err)
 	}
@@ -218,13 +244,15 @@ func Translate(size, hiddenSize int) {
 		deltas = append(deltas, make([]float32, len(p.X)))
 	}
 
+	quadratic := tf32.B(Quadratic)
+
 	query := tf32.Mul(set.Get("query"), others.Get("input"))
 	key := tf32.Mul(set.Get("key"), others.Get("input"))
 	value := tf32.Mul(set.Get("value"), others.Get("input"))
 	transformer := tf32.Softmax(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
-	cost := tf32.Avg(tf32.Quadratic(transformer, others.Get("output")))
+	cost := quadratic(transformer, others.Get("output"))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -233,7 +261,7 @@ func Translate(size, hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.0001), float32(.0001), 2048
+	alpha, eta, iterations := float32(.001), float32(.001), 2048
 	points := make(plotter.XYs, 0, iterations)
 	for i, in := range english {
 		out := german[i]
