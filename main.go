@@ -69,7 +69,7 @@ func main() {
 		Iris(32)
 		return
 	} else if *FlagTranslate {
-		Translate(4096, 1024)
+		Translate(4096, 4096)
 		return
 	} else if *FlagGerman != "" {
 		TranslateToGerman(4096, []byte(*FlagGerman))
@@ -130,17 +130,15 @@ func TranslateToGerman(size int, english []byte) {
 
 	transformer(func(a *tf32.V) bool {
 		output := make([]byte, 0, 2*size)
-		for i := 0; i < 2*size; i += 256 {
+		for i := 0; i < 2*size; i++ {
 			max, symbol := float32(0.0), 0
 			for j := 0; j < 256; j++ {
-				if s := a.X[i+j]; s > max {
-					fmt.Println(i+j, s, symbol)
+				if s := a.X[256*i+j]; s > max {
 					max, symbol = s, j
 				}
 			}
-			if symbol != 0 {
-				output = append(output, byte(symbol))
-			}
+			fmt.Println(max, symbol)
+			output = append(output, byte(symbol))
 		}
 		fmt.Println(string(output))
 		return true
