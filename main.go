@@ -132,6 +132,23 @@ func PositionEncoding(input *tf32.V) {
 	}
 }
 
+// ComplexPositionEncoding add position encoding to a complex vector
+func ComplexPositionEncoding(input *tc128.V) {
+	length, d, t := len(input.X), input.S[0], 0.0
+	for i := 0; i < length; i += d {
+		k := 0.0
+		for j := 0; j < d; j++ {
+			if j&1 == 0 {
+				input.X[i+j] += complex(0, math.Sin(math.Pow(10000, -2*k/float64(d))*t))
+			} else {
+				input.X[i+j] += complex(0, math.Cos(math.Pow(10000, -2*k/float64(d))*t))
+				k++
+			}
+		}
+		t++
+	}
+}
+
 // Quadratic computes the quadratic cost of two tensors
 func Quadratic(k tf32.Continuation, a, b *tf32.V) bool {
 	if len(a.S) != 2 || len(b.S) != 2 {
@@ -597,7 +614,7 @@ func ComplexIris(hiddenSize int) {
 			}
 		}
 	}
-	//PositionEncoding(others.Weights[0])
+	ComplexPositionEncoding(others.Weights[0])
 
 	set := tc128.NewSet()
 	set.Add("query", 4, hiddenSize)
@@ -627,7 +644,7 @@ func ComplexIris(hiddenSize int) {
 			tc128.SumRows(tc128.Hadamard(tc128.Softmax(key), value))))
 	cost := quadratic(transformer, others.Get("output"))
 
-	alpha, eta, iterations := complex128(.5+.5i), complex128(.5+.5i), 8*2048
+	alpha, eta, iterations := complex128(.5+.5i), complex128(.5+.5i), 16*2048
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
