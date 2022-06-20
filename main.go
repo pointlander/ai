@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"math/cmplx"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/pointlander/datum/iris"
+	"github.com/pointlander/gradient/tc128"
 	"github.com/pointlander/gradient/tf32"
 	"gonum.org/v1/plot"
 	"gonum.org/v1/plot/plotter"
@@ -30,6 +32,8 @@ var (
 	FlagTranslate = flag.Bool("translate", false, "Translate mode")
 	// FlagGerman translate english to german
 	FlagGerman = flag.String("german", "", "translate english to german")
+	// FlagComplex is a flag to run the complex mode
+	FlagComplex = flag.Bool("complex", false, "Complex mode")
 )
 
 // Statistics captures statistics
@@ -62,11 +66,45 @@ func (s Statistics) String() string {
 	return fmt.Sprintf("%f +- %f", s.Average(), s.StandardDeviation())
 }
 
+// ComplexStatistics captures statistics for complex numbers
+type ComplexStatistics struct {
+	Sum        complex128
+	SumSquared complex128
+	Count      int
+}
+
+// Add adds a statistic
+func (s *ComplexStatistics) Add(value complex128) {
+	s.Sum += value
+	s.SumSquared += value * value
+	s.Count++
+}
+
+// StandardDeviation calculates the standard deviation
+func (s ComplexStatistics) StandardDeviation() complex128 {
+	sum, count := s.Sum, complex(float64(s.Count), 0)
+	return cmplx.Sqrt((s.SumSquared - sum*sum/count) / count)
+}
+
+// Average calculates the average
+func (s ComplexStatistics) Average() complex128 {
+	return s.Sum / complex(float64(s.Count), 0)
+}
+
+// String returns the statistics as a string`
+func (s ComplexStatistics) String() string {
+	return fmt.Sprintf("%f +- %f", s.Average(), s.StandardDeviation())
+}
+
 func main() {
 	flag.Parse()
 
 	if *FlagIris {
-		Iris(32)
+		if *FlagComplex {
+			ComplexIris(32)
+		} else {
+			Iris(32)
+		}
 		return
 	} else if *FlagTranslate {
 		Translate(4096, 1024)
@@ -103,6 +141,31 @@ func Quadratic(k tf32.Continuation, a, b *tf32.V) bool {
 		panic("dimensions are not the same")
 	}
 	c, sum := tf32.NewV(1), float32(0.0)
+	for i, ax := range a.X {
+		p := (ax - b.X[i])
+		sum += p * p
+	}
+	c.X = append(c.X, .5*sum)
+	if k(&c) {
+		return true
+	}
+	d := c.D[0]
+	for i, ax := range a.X {
+		a.D[i] += (ax - b.X[i]) * d
+		b.D[i] += (b.X[i] - ax) * d
+	}
+	return false
+}
+
+// ComplexQuadratic computes the quadratic cost of two complex tensors
+func ComplexQuadratic(k tc128.Continuation, a, b *tc128.V) bool {
+	if len(a.S) != 2 || len(b.S) != 2 {
+		panic("tensor needs to have two dimensions")
+	}
+	if a.S[0] != b.S[0] || a.S[1] != b.S[1] {
+		panic("dimensions are not the same")
+	}
+	c, sum := tc128.NewV(1), complex(0, 0)
 	for i, ax := range a.X {
 		p := (ax - b.X[i])
 		sum += p * p
@@ -507,6 +570,132 @@ func Iris(hiddenSize int) {
 	p.Add(scatter)
 
 	err = p.Save(8*vg.Inch, 8*vg.Inch, "cost.png")
+	if err != nil {
+		panic(err)
+	}
+}
+
+// ComplexIris is the iris dataset using complex numbers
+func ComplexIris(hiddenSize int) {
+	rnd := rand.New(rand.NewSource(1))
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	iris := datum.Fisher
+	others := tc128.NewSet()
+	others.Add("input", 4, len(iris))
+	others.Add("output", 4, len(iris))
+
+	stats := [4]ComplexStatistics{}
+	for _, w := range others.Weights {
+		for _, data := range iris {
+			for i, measure := range data.Measures {
+				stats[i].Add(complex(measure, 0))
+				w.X = append(w.X, complex(measure, 0))
+			}
+		}
+	}
+	//PositionEncoding(others.Weights[0])
+
+	set := tc128.NewSet()
+	set.Add("query", 4, hiddenSize)
+	set.Add("key", 4, hiddenSize)
+	set.Add("value", 4, hiddenSize)
+	set.Add("project", hiddenSize, 4)
+
+	for _, w := range set.Weights {
+		factor := math.Sqrt(2.0 / float64(w.S[0]))
+		for i := 0; i < cap(w.X); i++ {
+			w.X = append(w.X, complex(rnd.NormFloat64()*factor, rnd.NormFloat64()*factor))
+		}
+	}
+
+	deltas := make([][]complex128, 0, 8)
+	for _, p := range set.Weights {
+		deltas = append(deltas, make([]complex128, len(p.X)))
+	}
+
+	quadratic := tc128.B(ComplexQuadratic)
+
+	query := tc128.Mul(set.Get("query"), others.Get("input"))
+	key := tc128.Mul(set.Get("key"), others.Get("input"))
+	value := tc128.Mul(set.Get("value"), others.Get("input"))
+	transformer := tc128.Mul(set.Get("project"),
+		tc128.Hadamard(tc128.Sigmoid(query),
+			tc128.SumRows(tc128.Hadamard(tc128.Softmax(key), value))))
+	cost := quadratic(transformer, others.Get("output"))
+
+	alpha, eta, iterations := complex128(.5+.5i), complex128(.5+.5i), 8*2048
+	points := make(plotter.XYs, 0, iterations)
+	i := 0
+	for i < iterations {
+		total := complex128(0.0)
+		set.Zero()
+		others.Zero()
+
+		/*if i == 128 || i == 2*128 || i == 3*128 || i == 4*128 {
+			for j := range d {
+				d[j] /= 10
+			}
+		}
+
+		index := 0
+		for _, data := range iris {
+			for i, measure := range data.Measures {
+				if d[i] == 0 {
+					inputs.X[index] = float32(measure)
+				} else {
+					inputs.X[index] = float32(measure + rnd.NormFloat64()*d[i])
+				}
+				index++
+			}
+		}*/
+
+		total += tc128.Gradient(cost).X[0]
+		sum := complex128(0.0)
+		for _, p := range set.Weights {
+			for _, d := range p.D {
+				sum += d * d
+			}
+		}
+		norm := cmplx.Abs(sum)
+		scaling := 1.0
+		if norm > 1 {
+			scaling = 1 / norm
+		}
+
+		for j, w := range set.Weights {
+			for k, d := range w.D {
+				deltas[j][k] = alpha*deltas[j][k] - eta*d*complex(scaling, 0)
+				set.Weights[j].X[k] += deltas[j][k]
+			}
+		}
+
+		points = append(points, plotter.XY{X: float64(i), Y: float64(cmplx.Abs(total))})
+		fmt.Println(i, total)
+		/*if total < .1 {
+			break
+		}*/
+		i++
+	}
+
+	p := plot.New()
+
+	p.Title.Text = "epochs vs cost"
+	p.X.Label.Text = "epochs"
+	p.Y.Label.Text = "cost"
+
+	scatter, err := plotter.NewScatter(points)
+	if err != nil {
+		panic(err)
+	}
+	scatter.GlyphStyle.Radius = vg.Length(1)
+	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(scatter)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, "complex_cost.png")
 	if err != nil {
 		panic(err)
 	}
