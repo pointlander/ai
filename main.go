@@ -29,7 +29,7 @@ var (
 	// FlagIris is a flag to run the Iris dataset
 	FlagIris = flag.Bool("iris", false, "Iris mode")
 	// FlagTranslate is a flag to run the translation for english to german
-	FlagTranslate = flag.Bool("translate", false, "Translate mode")
+	FlagLearn = flag.Bool("learn", false, "learn to translate mode")
 	// FlagGerman translate english to german
 	FlagGerman = flag.String("german", "", "translate english to german")
 	// FlagComplex is a flag to run the complex mode
@@ -106,8 +106,8 @@ func main() {
 			Iris(32)
 		}
 		return
-	} else if *FlagTranslate {
-		Translate(4096, 1024)
+	} else if *FlagLearn {
+		LearnToTranslate(4096, 1024)
 		return
 	} else if *FlagGerman != "" {
 		TranslateToGerman(4096, []byte(*FlagGerman))
@@ -256,8 +256,8 @@ func TranslateToGerman(size int, english []byte) {
 	})
 }
 
-// Translate translates english to german
-func Translate(size, hiddenSize int) {
+// LearnToTranslate learns to translates english to german
+func LearnToTranslate(size, hiddenSize int) {
 	englishIn, err := os.Open("europarl-v7.de-en.en")
 	if err != nil {
 		panic(err)
