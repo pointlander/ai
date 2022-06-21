@@ -103,7 +103,7 @@ func main() {
 		if *FlagComplex {
 			ComplexIris(32)
 		} else {
-			Iris(32)
+			Iris(16)
 		}
 		return
 	} else if *FlagLearn {
@@ -481,6 +481,9 @@ func Iris(hiddenSize int) {
 
 	stats := [4]Statistics{}
 	for _, w := range others.Weights {
+		if w.N == "position" {
+			continue
+		}
 		for _, data := range iris {
 			for i, measure := range data.Measures {
 				stats[i].Add(measure)
@@ -491,11 +494,12 @@ func Iris(hiddenSize int) {
 	//PositionEncoding(others.Weights[0])
 
 	set := tf32.NewSet()
-	set.Add("query", 4, hiddenSize)
-	set.Add("key", 4, hiddenSize)
-	set.Add("value", 4, hiddenSize)
+	set.Add("embed", 4, hiddenSize)
+	set.Add("position", hiddenSize, len(iris))
+	set.Add("query", hiddenSize, hiddenSize)
+	set.Add("key", hiddenSize, hiddenSize)
+	set.Add("value", hiddenSize, hiddenSize)
 	set.Add("project", hiddenSize, 4)
-	set.Add("position", 4, len(iris))
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
@@ -511,7 +515,7 @@ func Iris(hiddenSize int) {
 
 	quadratic := tf32.B(Quadratic)
 
-	input := tf32.Add(set.Get("position"), others.Get("input"))
+	input := tf32.Add(set.Get("position"), tf32.Mul(set.Get("embed"), others.Get("input")))
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
@@ -593,13 +597,13 @@ func Iris(hiddenSize int) {
 		panic(err)
 	}
 
-	position := set.Weights[4]
+	/*position := set.Weights[4]
 	for i := 0; i < len(iris); i++ {
 		for j := 0; j < 4; j++ {
 			fmt.Printf("%f ", position.X[i*4+j])
 		}
 		fmt.Println()
-	}
+	}*/
 }
 
 // ComplexIris is the iris dataset using complex numbers
