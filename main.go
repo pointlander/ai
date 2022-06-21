@@ -481,9 +481,6 @@ func Iris(hiddenSize int) {
 
 	stats := [4]Statistics{}
 	for _, w := range others.Weights {
-		if w.N == "position" {
-			continue
-		}
 		for _, data := range iris {
 			for i, measure := range data.Measures {
 				stats[i].Add(measure)
