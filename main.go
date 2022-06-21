@@ -488,13 +488,14 @@ func Iris(hiddenSize int) {
 			}
 		}
 	}
-	PositionEncoding(others.Weights[0])
+	//PositionEncoding(others.Weights[0])
 
 	set := tf32.NewSet()
 	set.Add("query", 4, hiddenSize)
 	set.Add("key", 4, hiddenSize)
 	set.Add("value", 4, hiddenSize)
 	set.Add("project", hiddenSize, 4)
+	set.Add("position", 4, len(iris))
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
@@ -510,15 +511,16 @@ func Iris(hiddenSize int) {
 
 	quadratic := tf32.B(Quadratic)
 
-	query := tf32.Mul(set.Get("query"), others.Get("input"))
-	key := tf32.Mul(set.Get("key"), others.Get("input"))
-	value := tf32.Mul(set.Get("value"), others.Get("input"))
+	input := tf32.Add(set.Get("position"), others.Get("input"))
+	query := tf32.Mul(set.Get("query"), input)
+	key := tf32.Mul(set.Get("key"), input)
+	value := tf32.Mul(set.Get("value"), input)
 	transformer := tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
 	cost := quadratic(transformer, others.Get("output"))
 
-	alpha, eta, iterations := float32(.01), float32(.01), 2048
+	alpha, eta, iterations := float32(.0001), float32(.0001), 8*2048
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
@@ -590,6 +592,14 @@ func Iris(hiddenSize int) {
 	if err != nil {
 		panic(err)
 	}
+
+	position := set.Weights[4]
+	for i := 0; i < len(iris); i++ {
+		for j := 0; j < 4; j++ {
+			fmt.Printf("%f ", position.X[i*4+j])
+		}
+		fmt.Println()
+	}
 }
 
 // ComplexIris is the iris dataset using complex numbers
@@ -614,13 +624,14 @@ func ComplexIris(hiddenSize int) {
 			}
 		}
 	}
-	ComplexPositionEncoding(others.Weights[0])
+	//ComplexPositionEncoding(others.Weights[0])
 
 	set := tc128.NewSet()
 	set.Add("query", 4, hiddenSize)
 	set.Add("key", 4, hiddenSize)
 	set.Add("value", 4, hiddenSize)
 	set.Add("project", hiddenSize, 4)
+	set.Add("position", 4, len(iris))
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
@@ -636,15 +647,16 @@ func ComplexIris(hiddenSize int) {
 
 	quadratic := tc128.B(ComplexQuadratic)
 
-	query := tc128.Mul(set.Get("query"), others.Get("input"))
-	key := tc128.Mul(set.Get("key"), others.Get("input"))
-	value := tc128.Mul(set.Get("value"), others.Get("input"))
+	input := tc128.Add(set.Get("position"), others.Get("input"))
+	query := tc128.Mul(set.Get("query"), input)
+	key := tc128.Mul(set.Get("key"), input)
+	value := tc128.Mul(set.Get("value"), input)
 	transformer := tc128.Mul(set.Get("project"),
 		tc128.Hadamard(tc128.Sigmoid(query),
 			tc128.SumRows(tc128.Hadamard(tc128.Softmax(key), value))))
 	cost := quadratic(transformer, others.Get("output"))
 
-	alpha, eta, iterations := complex128(.5+.5i), complex128(.5+.5i), 16*2048
+	alpha, eta, iterations := complex128(.1+.1i), complex128(.1+.1i), 16*2048
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
