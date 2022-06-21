@@ -103,7 +103,7 @@ func main() {
 		if *FlagComplex {
 			ComplexIris(32)
 		} else {
-			Iris(16)
+			Iris(64)
 		}
 		return
 	} else if *FlagLearn {
@@ -524,7 +524,7 @@ func Iris(hiddenSize int) {
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
 	cost := quadratic(transformer, others.Get("output"))
 
-	alpha, eta, iterations := float32(.0001), float32(.0001), 8*2048
+	alpha, eta, iterations := float32(.001), float32(.001), 8*2048
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
