@@ -515,7 +515,7 @@ func Iris(hiddenSize int) {
 
 	quadratic := tf32.B(Quadratic)
 
-	input := tf32.Add(set.Get("position"), tf32.Mul(set.Get("embed"), others.Get("input")))
+	input := tf32.Sigmoid(tf32.Add(set.Get("position"), tf32.Mul(set.Get("embed"), others.Get("input"))))
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
