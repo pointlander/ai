@@ -312,9 +312,11 @@ func LearnToTranslate(size, hiddenSize int) {
 	output.X = output.X[:cap(output.X)]
 
 	set := tf32.NewSet()
-	set.Add("query", 256, hiddenSize)
-	set.Add("key", 256, hiddenSize)
-	set.Add("value", 256, hiddenSize)
+	set.Add("embed", 256, hiddenSize)
+	set.Add("position", hiddenSize, 2*size)
+	set.Add("query", hiddenSize, hiddenSize)
+	set.Add("key", hiddenSize, hiddenSize)
+	set.Add("value", hiddenSize, hiddenSize)
 	set.Add("project", hiddenSize, hiddenSize)
 	set.Add("query1", hiddenSize, hiddenSize)
 	set.Add("key1", hiddenSize, hiddenSize)
@@ -335,9 +337,10 @@ func LearnToTranslate(size, hiddenSize int) {
 
 	quadratic := tf32.B(Quadratic)
 
-	query := tf32.Mul(set.Get("query"), others.Get("input"))
-	key := tf32.Mul(set.Get("key"), others.Get("input"))
-	value := tf32.Mul(set.Get("value"), others.Get("input"))
+	in := tf32.Sigmoid(tf32.Add(set.Get("position"), tf32.Mul(set.Get("embed"), others.Get("input"))))
+	query := tf32.Mul(set.Get("query"), in)
+	key := tf32.Mul(set.Get("key"), in)
+	value := tf32.Mul(set.Get("value"), in)
 	transformer := tf32.Sigmoid(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
@@ -387,7 +390,7 @@ func LearnToTranslate(size, hiddenSize int) {
 			output.X[256*j+int(byte(' '))] = 1
 			j++
 		}
-		PositionEncoding(input)
+		//PositionEncoding(input)
 
 		total := float32(0.0)
 		set.Zero()
