@@ -32,6 +32,8 @@ var (
 	FlagLearn = flag.Bool("learn", false, "learn to translate mode")
 	// FlagGerman translate english to german
 	FlagGerman = flag.String("german", "", "translate english to german")
+	// FlagName is a flag to run the named weight set
+	FlagName = flag.String("name", "set.w", "name of the weight set")
 	// FlagComplex is a flag to run the complex mode
 	FlagComplex = flag.Bool("complex", false, "Complex mode")
 )
@@ -110,7 +112,7 @@ func main() {
 		LearnToTranslate(4096, 1024)
 		return
 	} else if *FlagGerman != "" {
-		TranslateToGerman(4096, []byte(*FlagGerman))
+		TranslateToGerman(*FlagName, 4096, []byte(*FlagGerman))
 		return
 	}
 }
@@ -200,21 +202,22 @@ func ComplexQuadratic(k tc128.Continuation, a, b *tc128.V) bool {
 }
 
 // TranslateToGerman translates english to german
-func TranslateToGerman(size int, english []byte) {
+func TranslateToGerman(name string, size int, english []byte) {
 	others := tf32.NewSet()
 	others.Add("input", 256, 2*size)
 	input := others.Weights[0]
 	input.X = input.X[:cap(input.X)]
 
 	set := tf32.NewSet()
-	_, _, err := set.Open("3000_set.w")
+	_, _, err := set.Open(name)
 	if err != nil {
 		panic(err)
 	}
 
-	query := tf32.Mul(set.Get("query"), others.Get("input"))
-	key := tf32.Mul(set.Get("key"), others.Get("input"))
-	value := tf32.Mul(set.Get("value"), others.Get("input"))
+	in := tf32.Sigmoid(tf32.Add(set.Get("position"), tf32.Mul(set.Get("embed"), others.Get("input"))))
+	query := tf32.Mul(set.Get("query"), in)
+	key := tf32.Mul(set.Get("key"), in)
+	value := tf32.Mul(set.Get("value"), in)
 	transformer := tf32.Sigmoid(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
