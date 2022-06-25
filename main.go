@@ -112,7 +112,7 @@ func main() {
 		LearnToTranslate(256, 1024)
 		return
 	} else if *FlagGerman != "" {
-		TranslateToGerman(*FlagName, 4096, []byte(*FlagGerman))
+		TranslateToGerman(*FlagName, 256, []byte(*FlagGerman))
 		return
 	}
 }
@@ -273,8 +273,8 @@ func LearnToTranslate(size, hiddenSize int) {
 		if length := len(data); length > maxEnglish {
 			maxEnglish = length
 		}
-		if len(data) > 256 {
-			data = data[:256]
+		if len(data) > size {
+			data = data[:size]
 		}
 		english = append(english, data)
 	}
@@ -295,8 +295,8 @@ func LearnToTranslate(size, hiddenSize int) {
 		if length := len(data); length > maxGerman {
 			maxGerman = length
 		}
-		if len(data) > 256 {
-			data = data[:256]
+		if len(data) > size {
+			data = data[:size]
 		}
 		german = append(german, data)
 	}
@@ -366,7 +366,7 @@ func LearnToTranslate(size, hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.1), float32(.1), 2048
+	alpha, eta, iterations := float32(.001), float32(.001), 2048
 	points := make(plotter.XYs, 0, iterations)
 	for i, in := range english {
 		out := german[i]
