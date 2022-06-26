@@ -109,10 +109,10 @@ func main() {
 		}
 		return
 	} else if *FlagLearn {
-		LearnToTranslate(256, 1024)
+		LearnToTranslate(64, 2048)
 		return
 	} else if *FlagGerman != "" {
-		TranslateToGerman(*FlagName, 256, []byte(*FlagGerman))
+		TranslateToGerman(*FlagName, 64, []byte(*FlagGerman))
 		return
 	}
 }
@@ -335,12 +335,10 @@ func LearnToTranslate(size, hiddenSize int) {
 		}
 	}
 
-	deltas := make([][]float32, 0, 8)
+	/*deltas := make([][]float32, 0, 8)
 	for _, p := range set.Weights {
 		deltas = append(deltas, make([]float32, len(p.X)))
-	}
-
-	quadratic := tf32.B(Quadratic)
+	}*/
 
 	in := tf32.Sigmoid(tf32.Add(set.Get("position"), tf32.Mul(set.Get("embed"), others.Get("input"))))
 	query := tf32.Mul(set.Get("query"), in)
@@ -357,7 +355,7 @@ func LearnToTranslate(size, hiddenSize int) {
 		tf32.Hadamard(tf32.Sigmoid(query1),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key1), value1)))))
 
-	cost := quadratic(transformer1, others.Get("output"))
+	cost := tf32.Sum(tf32.CrossEntropy(transformer1, others.Get("output")))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -411,6 +409,13 @@ func LearnToTranslate(size, hiddenSize int) {
 		}*/
 
 		total += tf32.Gradient(cost).X[0]
+		if math.IsInf(float64(total), 0) {
+			fmt.Println("inf")
+			break
+		} else if math.IsNaN(float64(total)) {
+			fmt.Println("nan")
+			break
+		}
 		sum := float32(0.0)
 		for _, p := range set.Weights {
 			for _, d := range p.D {
@@ -425,8 +430,10 @@ func LearnToTranslate(size, hiddenSize int) {
 
 		for j, w := range set.Weights {
 			for k, d := range w.D {
-				deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
-				set.Weights[j].X[k] += deltas[j][k]
+				/*deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
+				set.Weights[j].X[k] += deltas[j][k]*/
+				_ = eta
+				set.Weights[j].X[k] -= alpha * d * scaling
 			}
 		}
 
