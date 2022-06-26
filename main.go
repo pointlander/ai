@@ -109,10 +109,10 @@ func main() {
 		}
 		return
 	} else if *FlagLearn {
-		LearnToTranslate(4096, 1024)
+		LearnToTranslate(64, 2048)
 		return
 	} else if *FlagGerman != "" {
-		TranslateToGerman(*FlagName, 4096, []byte(*FlagGerman))
+		TranslateToGerman(*FlagName, 64, []byte(*FlagGerman))
 		return
 	}
 }
@@ -204,7 +204,7 @@ func ComplexQuadratic(k tc128.Continuation, a, b *tc128.V) bool {
 // TranslateToGerman translates english to german
 func TranslateToGerman(name string, size int, english []byte) {
 	others := tf32.NewSet()
-	others.Add("input", 256, 2*size)
+	others.Add("input", 256, size)
 	input := others.Weights[0]
 	input.X = input.X[:cap(input.X)]
 
@@ -236,15 +236,11 @@ func TranslateToGerman(name string, size int, english []byte) {
 		input.X[256*j+int(value)] = 1
 		j++
 	}
-	for j < size {
-		input.X[256*j+int(byte(' '))] = 1
-		j++
-	}
-	PositionEncoding(input)
+	//PositionEncoding(input)
 
 	transformer1(func(a *tf32.V) bool {
-		output := make([]byte, 0, 2*size)
-		for i := 0; i < 2*size; i++ {
+		output := make([]byte, 0, size)
+		for i := 0; i < size; i++ {
 			max, symbol := float32(0.0), 0
 			for j := 0; j < 256; j++ {
 				if s := a.X[256*i+j]; s > max {
@@ -277,6 +273,9 @@ func LearnToTranslate(size, hiddenSize int) {
 		if length := len(data); length > maxEnglish {
 			maxEnglish = length
 		}
+		if len(data) > size {
+			data = data[:size]
+		}
 		english = append(english, data)
 	}
 
@@ -296,6 +295,9 @@ func LearnToTranslate(size, hiddenSize int) {
 		if length := len(data); length > maxGerman {
 			maxGerman = length
 		}
+		if len(data) > size {
+			data = data[:size]
+		}
 		german = append(german, data)
 	}
 
@@ -308,15 +310,15 @@ func LearnToTranslate(size, hiddenSize int) {
 	rnd := rand.New(rand.NewSource(1))
 
 	others := tf32.NewSet()
-	others.Add("input", 256, 2*size)
-	others.Add("output", 256, 2*size)
+	others.Add("input", 256, size)
+	others.Add("output", 256, size)
 	input, output := others.Weights[0], others.Weights[1]
 	input.X = input.X[:cap(input.X)]
 	output.X = output.X[:cap(output.X)]
 
 	set := tf32.NewSet()
 	set.Add("embed", 256, hiddenSize)
-	set.Add("position", hiddenSize, 2*size)
+	set.Add("position", hiddenSize, size)
 	set.Add("query", hiddenSize, hiddenSize)
 	set.Add("key", hiddenSize, hiddenSize)
 	set.Add("value", hiddenSize, hiddenSize)
@@ -333,12 +335,10 @@ func LearnToTranslate(size, hiddenSize int) {
 		}
 	}
 
-	deltas := make([][]float32, 0, 8)
+	/*deltas := make([][]float32, 0, 8)
 	for _, p := range set.Weights {
 		deltas = append(deltas, make([]float32, len(p.X)))
-	}
-
-	quadratic := tf32.B(Quadratic)
+	}*/
 
 	in := tf32.Sigmoid(tf32.Add(set.Get("position"), tf32.Mul(set.Get("embed"), others.Get("input"))))
 	query := tf32.Mul(set.Get("query"), in)
@@ -355,7 +355,7 @@ func LearnToTranslate(size, hiddenSize int) {
 		tf32.Hadamard(tf32.Sigmoid(query1),
 			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key1), value1)))))
 
-	cost := quadratic(transformer1, others.Get("output"))
+	cost := tf32.Sum(tf32.CrossEntropy(transformer1, others.Get("output")))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -364,7 +364,7 @@ func LearnToTranslate(size, hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.0001), float32(.0001), 2048
+	alpha, eta, iterations := float32(.001), float32(.001), 2048
 	points := make(plotter.XYs, 0, iterations)
 	for i, in := range english {
 		out := german[i]
@@ -377,20 +377,11 @@ func LearnToTranslate(size, hiddenSize int) {
 		j := 0
 		for _, value := range in {
 			input.X[256*j+int(value)] = 1
-			output.X[256*j+int(value)] = 1
 			j++
 		}
-		for j < size {
-			input.X[256*j+int(byte(' '))] = 1
-			output.X[256*j+int(byte(' '))] = 1
-			j++
-		}
+		j = 0
 		for _, value := range out {
 			output.X[256*j+int(value)] = 1
-			j++
-		}
-		for j < 2*size {
-			output.X[256*j+int(byte(' '))] = 1
 			j++
 		}
 		//PositionEncoding(input)
@@ -418,6 +409,13 @@ func LearnToTranslate(size, hiddenSize int) {
 		}*/
 
 		total += tf32.Gradient(cost).X[0]
+		if math.IsInf(float64(total), 0) {
+			fmt.Println("inf")
+			break
+		} else if math.IsNaN(float64(total)) {
+			fmt.Println("nan")
+			break
+		}
 		sum := float32(0.0)
 		for _, p := range set.Weights {
 			for _, d := range p.D {
@@ -432,8 +430,10 @@ func LearnToTranslate(size, hiddenSize int) {
 
 		for j, w := range set.Weights {
 			for k, d := range w.D {
-				deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
-				set.Weights[j].X[k] += deltas[j][k]
+				/*deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
+				set.Weights[j].X[k] += deltas[j][k]*/
+				_ = eta
+				set.Weights[j].X[k] -= alpha * d * scaling
 			}
 		}
 
