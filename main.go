@@ -218,16 +218,16 @@ func TranslateToGerman(name string, size int, english []byte) {
 	query := tf32.Mul(set.Get("query"), in)
 	key := tf32.Mul(set.Get("key"), in)
 	value := tf32.Mul(set.Get("value"), in)
-	transformer := tf32.Sigmoid(tf32.Mul(set.Get("project"),
+	transformer := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
-			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
+			tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key))), value)))), set.Get("bias")))
 
 	query1 := tf32.Mul(set.Get("query1"), transformer)
 	key1 := tf32.Mul(set.Get("key1"), transformer)
 	value1 := tf32.Mul(set.Get("value1"), transformer)
-	transformer1 := tf32.Softmax(tf32.Mul(set.Get("project1"),
+	transformer1 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project1"),
 		tf32.Hadamard(tf32.Sigmoid(query1),
-			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key1), value1)))))
+			tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key1))), value1)))), set.Get("bias1")))
 	for j := range input.X {
 		input.X[j] = 0
 	}
@@ -323,10 +323,12 @@ func LearnToTranslate(size, hiddenSize int) {
 	set.Add("key", hiddenSize, hiddenSize)
 	set.Add("value", hiddenSize, hiddenSize)
 	set.Add("project", hiddenSize, hiddenSize)
+	set.Add("bias", hiddenSize, size)
 	set.Add("query1", hiddenSize, hiddenSize)
 	set.Add("key1", hiddenSize, hiddenSize)
 	set.Add("value1", hiddenSize, hiddenSize)
 	set.Add("project1", hiddenSize, 256)
+	set.Add("bias1", 256, size)
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
@@ -344,18 +346,18 @@ func LearnToTranslate(size, hiddenSize int) {
 	query := tf32.Mul(set.Get("query"), in)
 	key := tf32.Mul(set.Get("key"), in)
 	value := tf32.Mul(set.Get("value"), in)
-	transformer := tf32.Sigmoid(tf32.Mul(set.Get("project"),
+	transformer := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
-			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))))
+			tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key))), value)))), set.Get("bias")))
 
 	query1 := tf32.Mul(set.Get("query1"), transformer)
 	key1 := tf32.Mul(set.Get("key1"), transformer)
 	value1 := tf32.Mul(set.Get("value1"), transformer)
-	transformer1 := tf32.Softmax(tf32.Mul(set.Get("project1"),
+	transformer1 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project1"),
 		tf32.Hadamard(tf32.Sigmoid(query1),
-			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key1), value1)))))
+			tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key1))), value1)))), set.Get("bias1")))
 
-	cost := tf32.Sum(tf32.CrossEntropy(transformer1, others.Get("output")))
+	cost := tf32.Sum(tf32.Quadratic(transformer1, others.Get("output")))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -364,10 +366,11 @@ func LearnToTranslate(size, hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.001), float32(.001), 2048
+	alpha, eta, iterations := float32(.01), float32(.01), 2048
 	points := make(plotter.XYs, 0, iterations)
-	for i, in := range english {
-		out := german[i]
+	{
+		in := []byte("hello world!")
+		out := in
 		for j := range input.X {
 			input.X[j] = 0
 		}
@@ -384,6 +387,26 @@ func LearnToTranslate(size, hiddenSize int) {
 			output.X[256*j+int(value)] = 1
 			j++
 		}
+	}
+	for i := 0; i < iterations; i++ {
+		/*for i, in := range english {
+		out := german[i]
+		for j := range input.X {
+			input.X[j] = 0
+		}
+		for j := range output.X {
+			output.X[j] = 0
+		}
+		j := 0
+		for _, value := range in {
+			input.X[256*j+int(value)] = 1
+			j++
+		}
+		j = 0
+		for _, value := range out {
+			output.X[256*j+int(value)] = 1
+			j++
+		}*/
 		//PositionEncoding(input)
 
 		total := float32(0.0)
@@ -524,7 +547,7 @@ func Iris(hiddenSize int) {
 	value := tf32.Mul(set.Get("value"), input)
 	transformer := tf32.Mul(set.Get("project"),
 		tf32.Hadamard(tf32.Sigmoid(query),
-			tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value))))
+			tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key))), value))))
 	cost := quadratic(transformer, others.Get("output"))
 
 	alpha, eta, iterations := float32(.001), float32(.001), 8*2048
