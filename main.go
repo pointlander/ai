@@ -225,7 +225,7 @@ func TranslateToGerman(name string, size int, english []byte) {
 	query1 := tf32.Mul(set.Get("query1"), transformer)
 	key1 := tf32.Mul(set.Get("key1"), transformer)
 	value1 := tf32.Mul(set.Get("value1"), transformer)
-	transformer1 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project1"),
+	transformer1 := tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project1"),
 		tf32.Hadamard(tf32.Sigmoid(query1),
 			tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key1))), value1)))), set.Get("bias1")))
 	for j := range input.X {
@@ -353,11 +353,11 @@ func LearnToTranslate(size, hiddenSize int) {
 	query1 := tf32.Mul(set.Get("query1"), transformer)
 	key1 := tf32.Mul(set.Get("key1"), transformer)
 	value1 := tf32.Mul(set.Get("value1"), transformer)
-	transformer1 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project1"),
+	transformer1 := tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project1"),
 		tf32.Hadamard(tf32.Sigmoid(query1),
 			tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key1))), value1)))), set.Get("bias1")))
 
-	cost := tf32.Sum(tf32.Quadratic(transformer1, others.Get("output")))
+	cost := tf32.Sum(tf32.CrossEntropy(transformer1, others.Get("output")))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -683,10 +683,10 @@ func ComplexIris(hiddenSize int) {
 	value := tc128.Mul(set.Get("value"), input)
 	transformer := tc128.Mul(set.Get("project"),
 		tc128.Hadamard(tc128.Sigmoid(query),
-			tc128.SumRows(tc128.Hadamard(tc128.Softmax(key), value))))
+			tc128.SumRows(tc128.Hadamard(tc128.T(tc128.Softmax(tc128.T(key))), value))))
 	cost := quadratic(transformer, others.Get("output"))
 
-	alpha, eta, iterations := complex128(.1+.1i), complex128(.1+.1i), 16*2048
+	alpha, eta, iterations := complex128(.5+.5i), complex128(.5+.5i), 32*2048
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
