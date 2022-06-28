@@ -794,7 +794,7 @@ func IrisFFT(hiddenSize int) {
 				}
 			}
 			for j, value := range f {
-				w.X[j*4+i] = float32(cmplx.Abs(value) / max)
+				w.X[j*4+i] = float32(cmplx.Abs(value))
 			}
 		}
 		fmt.Println(w.X)
@@ -803,7 +803,7 @@ func IrisFFT(hiddenSize int) {
 	set := tf32.NewSet()
 	set.Add("l1", 4, hiddenSize)
 	set.Add("b1", hiddenSize, len(iris))
-	set.Add("l2", hiddenSize, 4)
+	set.Add("l2", 2*hiddenSize, 4)
 	set.Add("b2", 4, len(iris))
 
 	for _, w := range set.Weights {
@@ -824,7 +824,7 @@ func IrisFFT(hiddenSize int) {
 
 	quadratic := tf32.B(Quadratic)
 
-	l1 := tf32.Sigmoid(tf32.Add(set.Get("b1"), tf32.Mul(set.Get("l1"), others.Get("input"))))
+	l1 := tf32.Everett(tf32.Add(set.Get("b1"), tf32.Mul(set.Get("l1"), others.Get("input"))))
 	l2 := tf32.Add(set.Get("b2"), tf32.Mul(set.Get("l2"), l1))
 	cost := quadratic(l2, others.Get("output"))
 
