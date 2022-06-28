@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/mjibson/go-dsp/fft"
 	"github.com/pointlander/datum/iris"
 	"github.com/pointlander/gradient/tc128"
 	"github.com/pointlander/gradient/tf32"
@@ -36,6 +37,8 @@ var (
 	FlagName = flag.String("name", "set.w", "name of the weight set")
 	// FlagComplex is a flag to run the complex mode
 	FlagComplex = flag.Bool("complex", false, "Complex mode")
+	// FlagFFT is a flag to run the FFT mode
+	FlagFFT = flag.Bool("fft", false, "FFT mode")
 )
 
 // Statistics captures statistics
@@ -104,6 +107,8 @@ func main() {
 	if *FlagIris {
 		if *FlagComplex {
 			ComplexIris(32)
+		} else if *FlagFFT {
+			IrisFFT(32)
 		} else {
 			Iris(64)
 		}
@@ -657,11 +662,12 @@ func ComplexIris(hiddenSize int) {
 	//ComplexPositionEncoding(others.Weights[0])
 
 	set := tc128.NewSet()
-	set.Add("query", 4, hiddenSize)
-	set.Add("key", 4, hiddenSize)
-	set.Add("value", 4, hiddenSize)
+	set.Add("embed", 4, hiddenSize)
+	set.Add("position", hiddenSize, len(iris))
+	set.Add("query", hiddenSize, hiddenSize)
+	set.Add("key", hiddenSize, hiddenSize)
+	set.Add("value", hiddenSize, hiddenSize)
 	set.Add("project", hiddenSize, 4)
-	set.Add("position", 4, len(iris))
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
@@ -677,7 +683,7 @@ func ComplexIris(hiddenSize int) {
 
 	quadratic := tc128.B(ComplexQuadratic)
 
-	input := tc128.Add(set.Get("position"), others.Get("input"))
+	input := tc128.Sigmoid(tc128.Add(set.Get("position"), tc128.Mul(set.Get("embed"), others.Get("input"))))
 	query := tc128.Mul(set.Get("query"), input)
 	key := tc128.Mul(set.Get("key"), input)
 	value := tc128.Mul(set.Get("value"), input)
@@ -755,6 +761,149 @@ func ComplexIris(hiddenSize int) {
 	p.Add(scatter)
 
 	err = p.Save(8*vg.Inch, 8*vg.Inch, "complex_cost.png")
+	if err != nil {
+		panic(err)
+	}
+}
+
+// IrisFFT is the iris dataset processing using FFT
+func IrisFFT(hiddenSize int) {
+	rnd := rand.New(rand.NewSource(1))
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+
+	}
+	iris := datum.Fisher
+	others := tf32.NewSet()
+	others.Add("input", 4, len(iris))
+	others.Add("output", 4, len(iris))
+
+	for _, w := range others.Weights {
+		w.X = w.X[:cap(w.X)]
+		for i := 0; i < 4; i++ {
+			r := make([]float64, len(iris))
+			for j, data := range iris {
+				r[j] = data.Measures[i]
+			}
+			f := fft.FFTReal(r)
+			max := 0.0
+			for _, value := range f {
+				if cmplx.Abs(value) > max {
+					max = cmplx.Abs(value)
+				}
+			}
+			for j, value := range f {
+				w.X[j*4+i] = float32(cmplx.Abs(value) / max)
+			}
+		}
+		fmt.Println(w.X)
+	}
+
+	set := tf32.NewSet()
+	set.Add("l1", 4, hiddenSize)
+	set.Add("b1", hiddenSize, len(iris))
+	set.Add("l2", hiddenSize, 4)
+	set.Add("b2", 4, len(iris))
+
+	for _, w := range set.Weights {
+		if strings.HasPrefix(w.N, "b") {
+			w.X = w.X[:cap(w.X)]
+			continue
+		}
+		factor := math.Sqrt(2.0 / float64(w.S[0]))
+		for i := 0; i < cap(w.X); i++ {
+			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
+		}
+	}
+
+	deltas := make([][]float32, 0, 8)
+	for _, p := range set.Weights {
+		deltas = append(deltas, make([]float32, len(p.X)))
+	}
+
+	quadratic := tf32.B(Quadratic)
+
+	l1 := tf32.Sigmoid(tf32.Add(set.Get("b1"), tf32.Mul(set.Get("l1"), others.Get("input"))))
+	l2 := tf32.Add(set.Get("b2"), tf32.Mul(set.Get("l2"), l1))
+	cost := quadratic(l2, others.Get("output"))
+
+	alpha, eta, iterations := float32(.001), float32(.001), 4*1024
+	points := make(plotter.XYs, 0, iterations)
+	i := 0
+	for i < iterations {
+		total := float32(0.0)
+		set.Zero()
+		others.Zero()
+
+		/*if i == 128 || i == 2*128 || i == 3*128 || i == 4*128 {
+			for j := range d {
+				d[j] /= 10
+			}
+		}
+
+		index := 0
+		for _, data := range iris {
+			for i, measure := range data.Measures {
+				if d[i] == 0 {
+					inputs.X[index] = float32(measure)
+				} else {
+					inputs.X[index] = float32(measure + rnd.NormFloat64()*d[i])
+				}
+				index++
+			}
+		}*/
+
+		total += tf32.Gradient(cost).X[0]
+		if math.IsInf(float64(total), 0) {
+			fmt.Println("inf")
+			break
+		} else if math.IsNaN(float64(total)) {
+			fmt.Println("nan")
+			break
+		}
+		sum := float32(0.0)
+		for _, p := range set.Weights {
+			for _, d := range p.D {
+				sum += d * d
+			}
+		}
+		norm := float32(math.Sqrt(float64(sum)))
+		scaling := float32(1.0)
+		if norm > 1 {
+			scaling = 1 / norm
+		}
+
+		for j, w := range set.Weights {
+			for k, d := range w.D {
+				deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
+				set.Weights[j].X[k] += deltas[j][k]
+			}
+		}
+
+		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
+		fmt.Println(i, total)
+		/*if total < .1 {
+			break
+		}*/
+		i++
+	}
+
+	p := plot.New()
+
+	p.Title.Text = "epochs vs cost"
+	p.X.Label.Text = "epochs"
+	p.Y.Label.Text = "cost"
+
+	scatter, err := plotter.NewScatter(points)
+	if err != nil {
+		panic(err)
+	}
+	scatter.GlyphStyle.Radius = vg.Length(1)
+	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(scatter)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, "fft_cost.png")
 	if err != nil {
 		panic(err)
 	}
