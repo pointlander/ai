@@ -105,10 +105,14 @@ func main() {
 	flag.Parse()
 
 	if *FlagIris {
-		if *FlagComplex {
+		if *FlagFFT {
+			if *FlagComplex {
+				ComplexIrisFFT(32)
+			} else {
+				IrisFFT(32)
+			}
+		} else if *FlagComplex {
 			ComplexIris(32)
-		} else if *FlagFFT {
-			IrisFFT(32)
 		} else {
 			Iris(64)
 		}
@@ -904,6 +908,151 @@ func IrisFFT(hiddenSize int) {
 	p.Add(scatter)
 
 	err = p.Save(8*vg.Inch, 8*vg.Inch, "fft_cost.png")
+	if err != nil {
+		panic(err)
+	}
+}
+
+// ComplexIrisFFT is the iris dataset processing using complex FFT
+func ComplexIrisFFT(hiddenSize int) {
+	rnd := rand.New(rand.NewSource(1))
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+
+	}
+	iris := datum.Fisher
+	others := tc128.NewSet()
+	others.Add("input", 4, len(iris))
+	others.Add("output", 4, len(iris))
+
+	max := 0.0
+	for i := 0; i < 4; i++ {
+		r := make([]complex128, len(iris))
+		for j, data := range iris {
+			r[j] = complex(data.Measures[i], 0)
+		}
+		f := fft.FFT(r)
+		for _, value := range f {
+			if cmplx.Abs(value) > max {
+				max = cmplx.Abs(value)
+			}
+		}
+	}
+
+	for _, w := range others.Weights {
+		w.X = w.X[:cap(w.X)]
+		for i := 0; i < 4; i++ {
+			r := make([]complex128, len(iris))
+			for j, data := range iris {
+				r[j] = complex(data.Measures[i], 0)
+			}
+			f := fft.FFT(r)
+			for j, value := range f {
+				w.X[j*4+i] = value / complex(max, 0)
+			}
+		}
+	}
+
+	set := tc128.NewSet()
+	set.Add("l1", 4, hiddenSize)
+	set.Add("b1", hiddenSize, len(iris))
+	set.Add("l2", hiddenSize, 4)
+	set.Add("b2", 4, len(iris))
+
+	for _, w := range set.Weights {
+		if strings.HasPrefix(w.N, "b") {
+			w.X = w.X[:cap(w.X)]
+			continue
+		}
+		factor := math.Sqrt(2.0 / float64(w.S[0]))
+		for i := 0; i < cap(w.X); i++ {
+			w.X = append(w.X, complex(rnd.NormFloat64()*factor, rnd.NormFloat64()*factor))
+		}
+	}
+
+	deltas := make([][]complex128, 0, 8)
+	for _, p := range set.Weights {
+		deltas = append(deltas, make([]complex128, len(p.X)))
+	}
+
+	quadratic := tc128.B(ComplexQuadratic)
+
+	l1 := tc128.TanH(tc128.Add(set.Get("b1"), tc128.Mul(set.Get("l1"), others.Get("input"))))
+	l2 := tc128.Add(set.Get("b2"), tc128.Mul(set.Get("l2"), l1))
+	cost := quadratic(l2, others.Get("output"))
+
+	alpha, eta, iterations := complex128(.01+.01i), complex128(.01+.01i), 8*2048
+	points := make(plotter.XYs, 0, iterations)
+	i := 0
+	for i < iterations {
+		total := complex128(0.0)
+		set.Zero()
+		others.Zero()
+
+		/*if i == 128 || i == 2*128 || i == 3*128 || i == 4*128 {
+			for j := range d {
+				d[j] /= 10
+			}
+		}
+
+		index := 0
+		for _, data := range iris {
+			for i, measure := range data.Measures {
+				if d[i] == 0 {
+					inputs.X[index] = float32(measure)
+				} else {
+					inputs.X[index] = float32(measure + rnd.NormFloat64()*d[i])
+				}
+				index++
+			}
+		}*/
+
+		total += tc128.Gradient(cost).X[0]
+		sum := complex128(0.0)
+		for _, p := range set.Weights {
+			for _, d := range p.D {
+				sum += d * d
+			}
+		}
+		norm := cmplx.Abs(sum)
+		scaling := 1.0
+		if norm > 1 {
+			scaling = 1 / norm
+		}
+
+		for j, w := range set.Weights {
+			for k, d := range w.D {
+				//deltas[j][k] = alpha*deltas[j][k] - eta*d*complex(scaling, 0)
+				//set.Weights[j].X[k] += deltas[j][k]
+				_ = alpha
+				set.Weights[j].X[k] -= eta * d * complex(scaling, 0)
+			}
+		}
+
+		points = append(points, plotter.XY{X: float64(i), Y: float64(cmplx.Abs(total))})
+		fmt.Println(i, total)
+		if cmplx.Abs(total) < .001 {
+			break
+		}
+		i++
+	}
+
+	p := plot.New()
+
+	p.Title.Text = "epochs vs cost"
+	p.X.Label.Text = "epochs"
+	p.Y.Label.Text = "cost"
+
+	scatter, err := plotter.NewScatter(points)
+	if err != nil {
+		panic(err)
+	}
+	scatter.GlyphStyle.Radius = vg.Length(1)
+	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(scatter)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, "complex_fft_cost.png")
 	if err != nil {
 		panic(err)
 	}
