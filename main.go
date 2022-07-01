@@ -210,6 +210,22 @@ func ComplexQuadratic(k tc128.Continuation, a, b *tc128.V) bool {
 	return false
 }
 
+// ComplexSigmoid computes the sigmoid of a complex tensor
+func ComplexSigmoid(k tc128.Continuation, a *tc128.V) bool {
+	c := tc128.NewV(a.S...)
+	for _, j := range a.X {
+		c.X = append(c.X, complex(1+math.Cos(cmplx.Phase(j)), 0)*j/2)
+	}
+	if k(&c) {
+		return true
+	}
+	for i, j := range c.D {
+		ax := a.X[i]
+		a.D[i] += j * complex((1+math.Cos(cmplx.Phase(ax)))/2, 0)
+	}
+	return false
+}
+
 // TranslateToGerman translates english to german
 func TranslateToGerman(name string, size int, english []byte) {
 	others := tf32.NewSet()
@@ -977,8 +993,9 @@ func ComplexIrisFFT(hiddenSize int) {
 	}
 
 	quadratic := tc128.B(ComplexQuadratic)
+	activation := tc128.U(ComplexSigmoid)
 
-	l1 := tc128.TanH(tc128.Add(set.Get("b1"), tc128.Mul(set.Get("l1"), others.Get("input"))))
+	l1 := activation(tc128.Add(set.Get("b1"), tc128.Mul(set.Get("l1"), others.Get("input"))))
 	l2 := tc128.Add(set.Get("b2"), tc128.Mul(set.Get("l2"), l1))
 	cost := quadratic(l2, others.Get("output"))
 
