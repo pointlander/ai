@@ -1122,14 +1122,6 @@ func ComplexTransformerIrisFFT(hiddenSize int) {
 		}
 	}
 
-	others.Add("original", 4, len(iris))
-	original := others.ByName["original"]
-	for _, data := range iris {
-		for _, measure := range data.Measures {
-			original.X = append(original.X, complex(measure/max, 0))
-		}
-	}
-
 	set := tc128.NewSet()
 	set.Add("query", 4, hiddenSize)
 	set.Add("key", 4, hiddenSize)
