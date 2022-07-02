@@ -1133,7 +1133,8 @@ func ComplexTransformerIrisFFT(hiddenSize int) {
 	set := tc128.NewSet()
 	set.Add("query", 4, hiddenSize)
 	set.Add("key", 4, hiddenSize)
-	set.Add("value", 4, 4)
+	set.Add("value", 4, hiddenSize)
+	set.Add("project", hiddenSize, 4)
 
 	for _, w := range set.Weights {
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
@@ -1149,13 +1150,14 @@ func ComplexTransformerIrisFFT(hiddenSize int) {
 
 	quadratic := tc128.B(ComplexQuadratic)
 
-	query := tc128.Mul(set.Get("query"), others.Get("original"))
-	key := tc128.Mul(set.Get("key"), others.Get("original"))
+	query := tc128.Mul(set.Get("query"), others.Get("input"))
+	key := tc128.Mul(set.Get("key"), others.Get("input"))
 	value := tc128.Mul(set.Get("value"), others.Get("input"))
 	l1 := tc128.Mul(tc128.T(value), tc128.Mul(query, key))
-	cost := quadratic(l1, others.Get("output"))
+	l2 := tc128.Mul(set.Get("project"), l1)
+	cost := quadratic(l2, others.Get("output"))
 
-	alpha, eta, iterations := complex128(.5+.5i), complex128(.5+.5i), 16*2048
+	alpha, eta, iterations := complex128(.1+.1i), complex128(.1+.1i), 4*2048
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
