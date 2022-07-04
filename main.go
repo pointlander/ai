@@ -286,8 +286,16 @@ func TranslateToGerman(name string, size int, english []byte) {
 	})
 }
 
-// LearnToTranslate learns to translates english to german
-func LearnToTranslate(size, hiddenSize int) {
+// TrainingData is the english and german training data
+type TrainingData struct {
+	English    [][]byte
+	MaxEnglish int
+	German     [][]byte
+	MaxGerman  int
+}
+
+// LoadTrainingData loads the training data
+func LoadTrainingData(size int) TrainingData {
 	englishIn, err := os.Open("europarl-v7.de-en.en")
 	if err != nil {
 		panic(err)
@@ -336,7 +344,18 @@ func LearnToTranslate(size, hiddenSize int) {
 		panic("unequal length")
 	}
 
-	fmt.Println(maxEnglish, maxGerman)
+	return TrainingData{
+		English:    english,
+		MaxEnglish: maxEnglish,
+		German:     german,
+		MaxGerman:  maxGerman,
+	}
+}
+
+// LearnToTranslate learns to translates english to german
+func LearnToTranslate(size, hiddenSize int) {
+	data := LoadTrainingData(size)
+	english, german := data.English, data.German
 
 	rnd := rand.New(rand.NewSource(1))
 
@@ -420,6 +439,7 @@ func LearnToTranslate(size, hiddenSize int) {
 		}
 	}
 	for i := 0; i < iterations; i++ {
+		_, _ = english, german
 		/*for i, in := range english {
 		out := german[i]
 		for j := range input.X {
