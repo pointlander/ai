@@ -112,7 +112,7 @@ func main() {
 				if *FlagTransformer {
 					ComplexTransformerIrisFFT(32)
 				} else {
-					ComplexIrisFFT(32)
+					ComplexIrisFFT(true, 32)
 				}
 			} else {
 				IrisFFT(32)
@@ -956,7 +956,7 @@ func IrisFFT(hiddenSize int) {
 }
 
 // ComplexIrisFFT is the iris dataset processing using complex FFT
-func ComplexIrisFFT(hiddenSize int) {
+func ComplexIrisFFT(textMode bool, hiddenSize int) {
 	rnd := rand.New(rand.NewSource(1))
 	datum, err := iris.Load()
 	if err != nil {
@@ -964,43 +964,70 @@ func ComplexIrisFFT(hiddenSize int) {
 
 	}
 	iris := datum.Fisher
-	others := tc128.NewSet()
-	others.Add("input", 4, len(iris))
-	others.Add("output", 4, len(iris))
 
-	max := 0.0
-	for i := 0; i < 4; i++ {
-		r := make([]complex128, len(iris))
-		for j, data := range iris {
-			r[j] = complex(data.Measures[i], 0)
-		}
-		f := fft.FFT(r)
-		for _, value := range f {
-			if cmplx.Abs(value) > max {
-				max = cmplx.Abs(value)
-			}
-		}
+	text := []byte("hello world!")
+
+	width, size := 4, len(iris)
+	if textMode {
+		width, size = 256, len(text)
 	}
 
-	for _, w := range others.Weights {
-		w.X = w.X[:cap(w.X)]
-		for i := 0; i < 4; i++ {
-			r := make([]complex128, len(iris))
+	others := tc128.NewSet()
+	others.Add("input", width, size)
+	others.Add("output", width, size)
+
+	if textMode {
+		length := complex(float64(size), 0)
+		for _, w := range others.Weights {
+			w.X = w.X[:cap(w.X)]
+			for i := 0; i < width; i++ {
+				r := make([]complex128, size)
+				for j, data := range text {
+					if int(data) == i {
+						r[j] = complex(1, 0)
+					}
+				}
+				f := fft.FFT(r)
+				for j, value := range f {
+					w.X[j*width+i] = value / length
+				}
+			}
+		}
+	} else {
+		max := 0.0
+		for i := 0; i < width; i++ {
+			r := make([]complex128, size)
 			for j, data := range iris {
 				r[j] = complex(data.Measures[i], 0)
 			}
 			f := fft.FFT(r)
-			for j, value := range f {
-				w.X[j*4+i] = value / complex(max, 0)
+			for _, value := range f {
+				if cmplx.Abs(value) > max {
+					max = cmplx.Abs(value)
+				}
+			}
+		}
+
+		for _, w := range others.Weights {
+			w.X = w.X[:cap(w.X)]
+			for i := 0; i < width; i++ {
+				r := make([]complex128, size)
+				for j, data := range iris {
+					r[j] = complex(data.Measures[i], 0)
+				}
+				f := fft.FFT(r)
+				for j, value := range f {
+					w.X[j*width+i] = value / complex(max, 0)
+				}
 			}
 		}
 	}
 
 	set := tc128.NewSet()
-	set.Add("l1", 4, hiddenSize)
-	set.Add("b1", hiddenSize, len(iris))
-	set.Add("l2", hiddenSize, 4)
-	set.Add("b2", 4, len(iris))
+	set.Add("l1", width, hiddenSize)
+	set.Add("b1", hiddenSize, size)
+	set.Add("l2", hiddenSize, width)
+	set.Add("b2", width, size)
 
 	for _, w := range set.Weights {
 		if strings.HasPrefix(w.N, "b") {
@@ -1026,6 +1053,9 @@ func ComplexIrisFFT(hiddenSize int) {
 	cost := quadratic(l2, others.Get("output"))
 
 	alpha, eta, iterations := complex128(.01+.01i), complex128(.01+.01i), 8*2048
+	if textMode {
+		alpha, eta, iterations = complex128(.001+.001i), complex128(.001+.001i), 16*2048
+	}
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < iterations {
