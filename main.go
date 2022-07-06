@@ -1054,7 +1054,7 @@ func ComplexIrisFFT(textMode bool, hiddenSize int) {
 
 	alpha, eta, iterations := complex128(.01+.01i), complex128(.01+.01i), 8*2048
 	if textMode {
-		alpha, eta, iterations = complex128(.001+.001i), complex128(.001+.001i), 16*2048
+		alpha, eta, iterations = complex128(.01+.01i), complex128(.01+.01i), 16*2048
 	}
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
