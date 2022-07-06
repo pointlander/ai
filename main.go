@@ -1089,9 +1089,9 @@ func ComplexIrisFFT(textMode bool, hiddenSize int) {
 			}
 		}
 		norm := cmplx.Abs(sum)
-		scaling := 1.0
+		scaling := complex(1.0, 0)
 		if norm > 1 {
-			scaling = 1 / norm
+			scaling = 1 / complex(math.Sqrt(norm), 0)
 		}
 
 		for j, w := range set.Weights {
@@ -1099,7 +1099,7 @@ func ComplexIrisFFT(textMode bool, hiddenSize int) {
 				//deltas[j][k] = alpha*deltas[j][k] - eta*d*complex(scaling, 0)
 				//set.Weights[j].X[k] += deltas[j][k]
 				_ = alpha
-				set.Weights[j].X[k] -= eta * d * complex(scaling, 0)
+				set.Weights[j].X[k] -= eta * d * scaling
 			}
 		}
 
