@@ -62,7 +62,7 @@ func Transformer(hiddenSize int) {
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
-	l1 := tf32.T(tf32.Mul(tf32.Mul(query, key), tf32.T(value)))
+	l1 := tf32.T(tf32.Mul(tf32.Softmax(tf32.Mul(query, key)), tf32.T(value)))
 	l2 := tf32.Mul(set.Get("project"), l1)
 	cost := quadratic(l2, others.Get("output"))
 
