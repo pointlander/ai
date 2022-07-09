@@ -52,4 +52,6 @@ func main() {
 		TranslateToGerman(*FlagName, 64, []byte(*FlagGerman))
 		return
 	}
+
+	Transformer(32)
 }
