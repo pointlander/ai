@@ -34,12 +34,17 @@ func Transformer(hiddenSize int) {
 	}
 
 	set := tf32.NewSet()
+	set.Add("encoding", width, size)
 	set.Add("query", width, hiddenSize)
 	set.Add("key", width, hiddenSize)
 	set.Add("value", width, hiddenSize)
 	set.Add("project", hiddenSize, width)
 
 	for _, w := range set.Weights {
+		if w.N == "encoding" {
+			w.X = w.X[:cap(w.X)]
+			continue
+		}
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
 		for i := 0; i < cap(w.X); i++ {
 			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
@@ -53,9 +58,10 @@ func Transformer(hiddenSize int) {
 
 	quadratic := tf32.B(Quadratic)
 
-	query := tf32.Mul(set.Get("query"), others.Get("input"))
-	key := tf32.Mul(set.Get("key"), others.Get("input"))
-	value := tf32.Mul(set.Get("value"), others.Get("input"))
+	input := tf32.Add(others.Get("input"), set.Get("encoding"))
+	query := tf32.Mul(set.Get("query"), input)
+	key := tf32.Mul(set.Get("key"), input)
+	value := tf32.Mul(set.Get("value"), input)
 	l1 := tf32.T(tf32.Mul(tf32.Mul(query, key), tf32.T(value)))
 	l2 := tf32.Mul(set.Get("project"), l1)
 	cost := quadratic(l2, others.Get("output"))
