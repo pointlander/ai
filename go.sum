@@ -58,6 +58,8 @@ github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINE
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/pointlander/datum/iris v0.0.0-20200802052503-0ee610caba95 h1:K9BmC+t1t+zW2IKR93mcPYbhsijtcsIqwttokvC0g/4=
 github.com/pointlander/datum/iris v0.0.0-20200802052503-0ee610caba95/go.mod h1:zlyed+Td2CpuOq/58UhB8/2grLv71oHWLY2CPscR+2w=
+github.com/pointlander/datum/mnist v0.0.0-20200802052503-0ee610caba95 h1:w8he3S59d2+lPD1zC/XjsEkt6LdXkeLZKJUFy7mN9c4=
+github.com/pointlander/datum/mnist v0.0.0-20200802052503-0ee610caba95/go.mod h1:JZkWBUy6wwx8zcKCr9uC+pkW5yqkPb5gXMtYkOAn/KE=
 github.com/pointlander/gradient v0.0.0-20220613003617-3a5294a0bd62 h1:UMsC4WiC/jSGhiipQOjoAmCBE21Itez1L8u1x7fhXRU=
 github.com/pointlander/gradient v0.0.0-20220613003617-3a5294a0bd62/go.mod h1:gVxcVB9oJ9tPTLxBB4mLnZ7gQ3tRdkLxr0v7WPkahJ8=
 github.com/pointlander/gradient v0.0.0-20220613004418-0e1851389f05 h1:WKVDvKzykhOECT9ft/zIUSs2obu6wZ790tu57gVQcqo=

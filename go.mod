@@ -17,6 +17,7 @@ require (
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.4.2 // indirect
 	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12 // indirect
+	github.com/pointlander/datum/mnist v0.0.0-20200802052503-0ee610caba95 // indirect
 	github.com/ziutek/blas v0.0.0-20190227122918-da4ca23e90bb // indirect
 	golang.org/x/image v0.0.0-20220302094943-723b81ca9867 // indirect
 	golang.org/x/text v0.3.7 // indirect

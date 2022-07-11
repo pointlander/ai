@@ -37,7 +37,7 @@ func SelectedPositionEncoding(positions []int, input *tf32.V) {
 	for i := 0; i < length; i += d {
 		k := 0.0
 		for j := 0; j < d; j++ {
-			position := float64(positions[t])
+			position := float64(positions[t]) / 4096
 			if j&1 == 0 {
 				input.X[i+j] += float32(math.Sin(math.Pow(10000, -2*k/float64(d)) * position))
 			} else {

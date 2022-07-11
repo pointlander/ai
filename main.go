@@ -52,6 +52,6 @@ func main() {
 		TranslateToGerman(*FlagName, 64, []byte(*FlagGerman))
 		return
 	}
-
-	Transformer(32)
+	//Transformer(32)
+	ProbabilisticTransformer(32)
 }
