@@ -7,6 +7,8 @@ package main
 import (
 	"math"
 	"math/cmplx"
+	"math/rand"
+	"sort"
 
 	"github.com/pointlander/gradient/tc128"
 	"github.com/pointlander/gradient/tf32"
@@ -22,6 +24,24 @@ func PositionEncoding(input *tf32.V) {
 				input.X[i+j] += float32(math.Sin(math.Pow(10000, -2*k/float64(d)) * t))
 			} else {
 				input.X[i+j] += float32(math.Cos(math.Pow(10000, -2*k/float64(d)) * t))
+				k++
+			}
+		}
+		t++
+	}
+}
+
+// SelectedPositionEncoding add position encoding to vector for positions
+func SelectedPositionEncoding(positions []int, input *tf32.V) {
+	length, d, t := len(input.X), input.S[0], 0
+	for i := 0; i < length; i += d {
+		k := 0.0
+		for j := 0; j < d; j++ {
+			position := float64(positions[t])
+			if j&1 == 0 {
+				input.X[i+j] += float32(math.Sin(math.Pow(10000, -2*k/float64(d)) * position))
+			} else {
+				input.X[i+j] += float32(math.Cos(math.Pow(10000, -2*k/float64(d)) * position))
 				k++
 			}
 		}
@@ -110,4 +130,12 @@ func ComplexSigmoid(k tc128.Continuation, a *tc128.V) bool {
 		a.D[i] += j * complex((1+math.Cos(cmplx.Phase(ax)))/2, 0)
 	}
 	return false
+}
+
+// SelectPositions selects the positions of input data
+func SelectPositions(rnd *rand.Rand, max int, positions []int) {
+	for i := range positions {
+		positions[i] = rnd.Intn(max)
+	}
+	sort.Ints(positions)
 }
