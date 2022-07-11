@@ -22,12 +22,12 @@ import (
 
 // ProbabilisticTransformer is a probabilistic transformer
 func ProbabilisticTransformer(hiddenSize int) {
-	rnd := rand.New(rand.NewSource(1))
+	rnd := rand.New(rand.NewSource(2))
 	images, err := mnist.Load()
 	if err != nil {
 		panic(err)
 	}
-	width, size := 1, 256
+	width, size := 2, 256
 	others := tf32.NewSet()
 	others.Add("input", width, size)
 	others.Add("output", 10, size)
@@ -38,6 +38,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	inputs, outputs := others.ByName["input"], others.ByName["output"]
 
 	set := tf32.NewSet()
+	set.Add("positions", width, size)
 	set.Add("query", width, hiddenSize)
 	set.Add("key", width, hiddenSize)
 	set.Add("value", width, hiddenSize)
@@ -45,7 +46,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	set.Add("bias", 10, 1)
 
 	for _, w := range set.Weights {
-		if w.N == "bias" || w.N == "bias1" {
+		if w.N == "bias" || w.N == "positions" {
 			w.X = w.X[:cap(w.X)]
 			continue
 		}
@@ -54,6 +55,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
 		}
 	}
+	positions := set.ByName["positions"]
 
 	deltas := make([][]float32, 0, 8)
 	for _, p := range set.Weights {
@@ -63,7 +65,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	quadratic := tf32.B(Quadratic)
 	softmax := tf32.U(Softmax)
 
-	input := others.Get("input")
+	input := tf32.Add(others.Get("input"), set.Get("positions"))
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
@@ -83,6 +85,10 @@ func ProbabilisticTransformer(hiddenSize int) {
 	points := make(plotter.XYs, 0, iterations)
 	selections := make([]int, size)
 	symbols := images.Train.Width * images.Train.Height
+	encodings := make([]float32, 2*symbols)
+	for i := range encodings {
+		encodings[i] = float32(math.Abs(rnd.NormFloat64()))
+	}
 	for i, image := range images.Train.Images {
 		total := float32(0.0)
 		set.Zero()
@@ -94,12 +100,28 @@ func ProbabilisticTransformer(hiddenSize int) {
 			outputs.X[j] = 0
 		}
 
-		SelectPositions(rnd, symbols, selections)
-		for j, selection := range selections {
-			inputs.X[j] = float32(image[selection])
-			outputs.X[j*10+int(images.Train.Labels[i])] = 1
+		if i > 0 {
+			index := 0
+			for _, selection := range selections {
+				encodings[2*selection] = positions.X[index]
+				index++
+				encodings[2*selection+1] = positions.X[index]
+				index++
+			}
 		}
-		SelectedPositionEncoding(selections, inputs)
+		SelectPositions(rnd, symbols, selections)
+		index, index1 := 0, 0
+		for j, selection := range selections {
+			inputs.X[index] = float32(image[selection])
+			index++
+			inputs.X[index] = float32(image[(selection+1)%symbols])
+			index++
+			outputs.X[j*10+int(images.Train.Labels[i])] = 1
+			positions.X[index1] = encodings[2*selection]
+			index1++
+			positions.X[index1] = encodings[2*selection+1]
+			index1++
+		}
 
 		total += tf32.Gradient(cost).X[0]
 		sum := float32(0.0)
@@ -163,7 +185,7 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	if err != nil {
 		panic(err)
 	}
-	width, size := 1, 256
+	width, size := 2, 256
 	others := tf32.NewSet()
 	others.Add("input", width, size)
 
@@ -195,8 +217,12 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 			inputs.X[j] = 0
 		}
 		SelectPositions(rnd, symbols, selections)
-		for j, selection := range selections {
-			inputs.X[j] = float32(image[selection])
+		index := 0
+		for _, selection := range selections {
+			inputs.X[index] = float32(image[selection])
+			index++
+			inputs.X[index] = float32(image[(selection+1)%symbols])
+			index++
 		}
 		SelectedPositionEncoding(selections, inputs)
 
