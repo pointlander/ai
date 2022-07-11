@@ -30,7 +30,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	width, size := 1, 256
 	others := tf32.NewSet()
 	others.Add("input", width, size)
-	others.Add("output", 10, size)
+	others.Add("output", 20, size)
 
 	for _, w := range others.Weights {
 		w.X = w.X[:cap(w.X)]
@@ -42,8 +42,13 @@ func ProbabilisticTransformer(hiddenSize int) {
 	set.Add("key", width, hiddenSize)
 	set.Add("value", width, hiddenSize)
 	set.Add("project", hiddenSize, 10)
+	set.Add("bias", 10, 1)
 
 	for _, w := range set.Weights {
+		if w.N == "bias" {
+			w.X = w.X[:cap(w.X)]
+			continue
+		}
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
 		for i := 0; i < cap(w.X); i++ {
 			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
@@ -62,7 +67,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
 	l1 := tf32.T(tf32.Mul(tf32.Softmax(tf32.Mul(query, key)), tf32.T(value)))
-	l2 := tf32.Mul(set.Get("project"), l1)
+	l2 := tf32.Everett(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias")))
 	cost := quadratic(l2, others.Get("output"))
 
 	c, halt := make(chan os.Signal), false
@@ -90,7 +95,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 		SelectPositions(rnd, symbols, selections)
 		for j, selection := range selections {
 			inputs.X[j] = float32(image[selection])
-			outputs.X[j*10+int(images.Train.Labels[selection])] = 1
+			outputs.X[j*20+2*int(images.Train.Labels[i])+1] = 1
 		}
 		SelectedPositionEncoding(selections, inputs)
 
