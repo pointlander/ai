@@ -77,7 +77,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.0001), float32(.0001), len(images.Train.Images)
+	alpha, eta, iterations := float32(.01), float32(.01), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
 	selections := make([]int, size)
 	symbols := images.Train.Width * images.Train.Height
@@ -89,12 +89,17 @@ func ProbabilisticTransformer(hiddenSize int) {
 			inputs.X[j] = 0
 		}
 		for j := range outputs.X {
-			outputs.X[j] = 0
+			if j&1 == 0 {
+				outputs.X[j] = -1
+			} else {
+				outputs.X[j] = 0
+			}
 		}
 
 		SelectPositions(rnd, symbols, selections)
 		for j, selection := range selections {
 			inputs.X[j] = float32(image[selection])
+			outputs.X[j*20+2*int(images.Train.Labels[i])] = 0
 			outputs.X[j*20+2*int(images.Train.Labels[i])+1] = 1
 		}
 		SelectedPositionEncoding(selections, inputs)
