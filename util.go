@@ -132,6 +132,31 @@ func ComplexSigmoid(k tc128.Continuation, a *tc128.V) bool {
 	return false
 }
 
+func exp(a float32) float32 {
+	return float32(math.Exp(float64(a)))
+}
+
+// Softmax is the softmax function
+func Softmax(k tf32.Continuation, a *tf32.V) bool {
+	c, size, sum := tf32.NewV(a.S...), len(a.X), float32(0.0)
+	for i := 0; i < size; i++ {
+		e := exp(a.X[i])
+		sum += e
+		c.X = append(c.X, e)
+	}
+	for i, cx := range c.X {
+		c.X[i] = cx / sum
+	}
+	if k(&c) {
+		return true
+	}
+	for i, d := range c.D {
+		cx := c.X[i]
+		a.D[i] += d * (cx - cx*cx)
+	}
+	return false
+}
+
 // SelectPositions selects the positions of input data
 func SelectPositions(rnd *rand.Rand, max int, positions []int) {
 	for i := range positions {

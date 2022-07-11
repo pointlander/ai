@@ -52,6 +52,11 @@ func main() {
 		TranslateToGerman(*FlagName, 64, []byte(*FlagGerman))
 		return
 	}
+
 	//Transformer(32)
-	ProbabilisticTransformer(32)
+	if *FlagTransformer {
+		ProbabilisticTransformer(32)
+	} else if *FlagName != "" {
+		InferenceProbabilisticTransformer(1, *FlagName, 32)
+	}
 }
