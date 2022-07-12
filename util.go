@@ -164,3 +164,18 @@ func SelectPositions(rnd *rand.Rand, max int, positions []int) {
 	}
 	sort.Ints(positions)
 }
+
+// Mask masks the input data
+func Mask(k tf32.Continuation, a *tf32.V) bool {
+	c := tf32.NewV(10, 1)
+	for i := 0; i < 10; i++ {
+		c.X = append(c.X, a.X[i])
+	}
+	if k(&c) {
+		return true
+	}
+	for i := 0; i < 10; i++ {
+		a.D[i] += c.D[i]
+	}
+	return false
+}

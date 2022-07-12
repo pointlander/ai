@@ -22,57 +22,66 @@ import (
 
 // ProbabilisticTransformer is a probabilistic transformer
 func ProbabilisticTransformer(hiddenSize int) {
-	rnd := rand.New(rand.NewSource(2))
+	rnd := rand.New(rand.NewSource(1))
 	images, err := mnist.Load()
 	if err != nil {
 		panic(err)
 	}
-	width, size := 2, 256
+	width, size := 1, 256
+	selections := make([]int, size)
+	symbols := images.Train.Width * images.Train.Height
+	SelectPositions(rnd, symbols, selections)
+
 	others := tf32.NewSet()
 	others.Add("input", width, size)
-	others.Add("output", 10, size)
+	others.Add("output", 10, 1)
+	others.Add("dk", size, 1)
 
 	for _, w := range others.Weights {
 		w.X = w.X[:cap(w.X)]
 	}
-	inputs, outputs := others.ByName["input"], others.ByName["output"]
+	inputs, outputs, dk := others.ByName["input"], others.ByName["output"], others.ByName["dk"]
+	for i := range dk.X {
+		dk.X[i] = 1 / float32(size)
+	}
 
 	set := tf32.NewSet()
-	set.Add("positions", width, size)
-	set.Add("query", width, hiddenSize)
-	set.Add("key", width, hiddenSize)
-	set.Add("value", width, hiddenSize)
+	set.Add("embedding", width, hiddenSize)
+	set.Add("bias1", hiddenSize, 1)
+	set.Add("query", hiddenSize, hiddenSize)
+	set.Add("key", hiddenSize, hiddenSize)
+	set.Add("value", hiddenSize, hiddenSize)
 	set.Add("project", hiddenSize, 10)
 	set.Add("bias", 10, 1)
 
 	for _, w := range set.Weights {
-		if w.N == "bias" || w.N == "positions" {
+		if w.N == "bias" || w.N == "bias1" {
 			w.X = w.X[:cap(w.X)]
 			continue
 		}
-		factor := math.Sqrt(2.0 / float64(w.S[0]))
+		factor := math.Sqrt(2.0 / float64(size*size))
 		for i := 0; i < cap(w.X); i++ {
 			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
 		}
 	}
-	positions := set.ByName["positions"]
 
 	deltas := make([][]float32, 0, 8)
 	for _, p := range set.Weights {
 		deltas = append(deltas, make([]float32, len(p.X)))
 	}
 
-	quadratic := tf32.B(Quadratic)
+	//quadratic := tf32.B(Quadratic)
 	softmax := tf32.U(Softmax)
+	mask := tf32.U(Mask)
 
-	input := tf32.Add(others.Get("input"), set.Get("positions"))
+	input := tf32.Add(tf32.Mul(set.Get("embedding"), others.Get("input")), set.Get("bias1"))
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
-	l1 := tf32.T(tf32.Mul(softmax(tf32.Mul(query, key)), tf32.T(value)))
-	l2 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias")))
+	l1 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value)))
+	l2 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))))
 
-	cost := quadratic(l2, others.Get("output"))
+	cost := tf32.Sum(tf32.CrossEntropy(l2, others.Get("output")))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -81,15 +90,16 @@ func ProbabilisticTransformer(hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.001), float32(.001), len(images.Train.Images)
+	alpha, eta, iterations := float32(.05), float32(.05), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
-	selections := make([]int, size)
-	symbols := images.Train.Width * images.Train.Height
 	encodings := make([]float32, 2*symbols)
 	for i := range encodings {
 		encodings[i] = float32(math.Abs(rnd.NormFloat64()))
 	}
-	for i, image := range images.Train.Images {
+	i := 0
+	for i < 5*len(images.Train.Images) {
+		index := rand.Intn(len(images.Train.Images))
+		image := images.Train.Images[index]
 		total := float32(0.0)
 		set.Zero()
 		others.Zero()
@@ -100,28 +110,11 @@ func ProbabilisticTransformer(hiddenSize int) {
 			outputs.X[j] = 0
 		}
 
-		if i > 0 {
-			index := 0
-			for _, selection := range selections {
-				encodings[2*selection] = positions.X[index]
-				index++
-				encodings[2*selection+1] = positions.X[index]
-				index++
-			}
-		}
-		SelectPositions(rnd, symbols, selections)
-		index, index1 := 0, 0
 		for j, selection := range selections {
-			inputs.X[index] = float32(image[selection])
-			index++
-			inputs.X[index] = float32(image[(selection+1)%symbols])
-			index++
-			outputs.X[j*10+int(images.Train.Labels[i])] = 1
-			positions.X[index1] = encodings[2*selection]
-			index1++
-			positions.X[index1] = encodings[2*selection+1]
-			index1++
+			inputs.X[j] = float32(image[selection])
 		}
+		outputs.X[int(images.Train.Labels[index])] = 1
+		PositionEncoding(inputs)
 
 		total += tf32.Gradient(cost).X[0]
 		sum := float32(0.0)
@@ -147,7 +140,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 
 		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
 		fmt.Println(i, total)
-		if halt {
+		if halt || math.IsNaN(float64(total)) {
 			break
 		}
 		if i%1000 == 0 {
@@ -185,14 +178,21 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	if err != nil {
 		panic(err)
 	}
-	width, size := 2, 256
+	width, size := 1, 256
+	selections := make([]int, size)
+	symbols := images.Train.Width * images.Train.Height
+	SelectPositions(rnd, symbols, selections)
 	others := tf32.NewSet()
 	others.Add("input", width, size)
+	others.Add("dk", size, 1)
 
 	for _, w := range others.Weights {
 		w.X = w.X[:cap(w.X)]
 	}
-	inputs := others.ByName["input"]
+	inputs, dk := others.ByName["input"], others.ByName["dk"]
+	for i := range dk.X {
+		dk.X[i] = 1 / float32(size)
+	}
 
 	set := tf32.NewSet()
 	_, _, err = set.Open(name)
@@ -200,45 +200,35 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 		panic(err)
 	}
 
-	input := others.Get("input")
+	//quadratic := tf32.B(Quadratic)
+	softmax := tf32.U(Softmax)
+	mask := tf32.U(Mask)
+
+	input := tf32.Add(tf32.Mul(set.Get("embedding"), others.Get("input")), set.Get("bias1"))
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
-	l1 := tf32.T(tf32.Mul(tf32.Softmax(tf32.Mul(query, key)), tf32.T(value)))
-	l2 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias")))
+	l1 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value)))
+	l2 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))))
 
 	image := images.Test.Images[test]
 	fmt.Println(images.Test.Labels[test])
-	selections := make([]int, size)
-	symbols := images.Train.Width * images.Train.Height
+
 	histogram := make([]float32, 10)
-	for shot := 0; shot < 10; shot++ {
-		for j := range inputs.X {
-			inputs.X[j] = 0
-		}
-		SelectPositions(rnd, symbols, selections)
-		index := 0
-		for _, selection := range selections {
-			inputs.X[index] = float32(image[selection])
-			index++
-			inputs.X[index] = float32(image[(selection+1)%symbols])
-			index++
-		}
-		SelectedPositionEncoding(selections, inputs)
-
-		l2(func(a *tf32.V) bool {
-
-			for i := 0; i < size; i += 20 {
-				index := 0
-				for j := 0; j < 20; j++ {
-					if j&1 == 1 {
-						histogram[index] += a.X[i+j]
-						index++
-					}
-				}
-			}
-			return true
-		})
+	for j := range inputs.X {
+		inputs.X[j] = 0
 	}
+
+	for j, selection := range selections {
+		inputs.X[j] = float32(image[selection])
+	}
+	PositionEncoding(inputs)
+
+	l2(func(a *tf32.V) bool {
+		for j := 0; j < 10; j++ {
+			histogram[j] += a.X[j]
+		}
+		return true
+	})
 	fmt.Println(histogram)
 }
