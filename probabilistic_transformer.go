@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 
 	"github.com/pointlander/datum/mnist"
@@ -51,8 +52,13 @@ func ProbabilisticTransformer(hiddenSize int) {
 	set.Add("query", width, hiddenSize)
 	set.Add("key", width, hiddenSize)
 	set.Add("value", width, hiddenSize)
-	set.Add("project", hiddenSize, 10)
-	set.Add("bias", 10, 1)
+	set.Add("project", hiddenSize, hiddenSize)
+	set.Add("bias", hiddenSize, 1)
+	set.Add("query1", hiddenSize, hiddenSize)
+	set.Add("key1", hiddenSize, hiddenSize)
+	set.Add("value1", hiddenSize, hiddenSize)
+	set.Add("project1", hiddenSize, 10)
+	set.Add("bias1", 10, 1)
 
 	for _, w := range set.Weights {
 		if w.N == "bias" || w.N == "bias1" {
@@ -79,11 +85,19 @@ func ProbabilisticTransformer(hiddenSize int) {
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
 	l1 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value)))
-	l2 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))))
+	l2 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias")))
+	query1 := tf32.Mul(set.Get("query1"), l2)
+	key1 := tf32.Mul(set.Get("key1"), l2)
+	value1 := tf32.Mul(set.Get("value1"), l2)
+	l3 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1)))
+	l4 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project1"), l3), set.Get("bias1"))))
 
 	regularization := tf32.Add(tf32.Sum(tf32.Abs(set.Get("query"))), tf32.Sum(tf32.Abs(set.Get("key"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value"))))
-	cost := tf32.Hadamard(tf32.Sum(tf32.CrossEntropy(l2, others.Get("output"))), regularization)
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("query1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("key1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value1"))))
+	cost := tf32.Hadamard(tf32.Sum(tf32.CrossEntropy(l4, others.Get("output"))), regularization)
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -92,7 +106,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.05), float32(.05), len(images.Train.Images)
+	alpha, eta, iterations := float32(.00001), float32(.00001), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < 5*len(images.Train.Images) {
@@ -212,12 +226,21 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
 	l1 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value)))
-	l2 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))))
+	l2 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias")))
+	query1 := tf32.Mul(set.Get("query1"), l2)
+	key1 := tf32.Mul(set.Get("key1"), l2)
+	value1 := tf32.Mul(set.Get("value1"), l2)
+	l3 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1)))
+	l4 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project1"), l3), set.Get("bias1"))))
 
 	image := images.Test.Images[test]
 	fmt.Println(images.Test.Labels[test])
 
-	histogram := make([]float32, 10)
+	type Result struct {
+		Probability float32
+		Index       int
+	}
+	histogram := make([]Result, 10)
 	for j := range inputs.X {
 		inputs.X[j] = 0
 	}
@@ -229,11 +252,15 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	}
 	PositionEncoding(inputs)
 
-	l2(func(a *tf32.V) bool {
+	l4(func(a *tf32.V) bool {
 		for j := 0; j < 10; j++ {
-			histogram[j] += a.X[j]
+			histogram[j].Probability += a.X[j]
+			histogram[j].Index = j
 		}
 		return true
+	})
+	sort.Slice(histogram, func(i, j int) bool {
+		return histogram[i].Probability > histogram[j].Probability
 	})
 	fmt.Println(histogram)
 }
