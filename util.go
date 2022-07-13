@@ -158,11 +158,16 @@ func Softmax(k tf32.Continuation, a *tf32.V) bool {
 }
 
 // SelectPositions selects the positions of input data
-func SelectPositions(rnd *rand.Rand, max int, positions []int) {
-	for i := range positions {
-		positions[i] = rnd.Intn(max)
+func SelectPositions(rnd *rand.Rand, width, height int, positions [][]int) {
+	for _, set := range positions {
+		for i := range set {
+			x, y := rnd.Intn(width), rnd.Intn(height)
+			x = (x + int(rnd.NormFloat64()*float64(width/8)) + width) % width
+			y = (x + int(rnd.NormFloat64()*float64(height/8)) + height) % height
+			set[i] = y*width + x
+		}
+		sort.Ints(set)
 	}
-	sort.Ints(positions)
 }
 
 // Mask masks the input data

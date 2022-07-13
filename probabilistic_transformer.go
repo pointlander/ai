@@ -27,10 +27,12 @@ func ProbabilisticTransformer(hiddenSize int) {
 	if err != nil {
 		panic(err)
 	}
-	width, size := 1, 256
-	selections := make([]int, size)
-	symbols := images.Train.Width * images.Train.Height
-	SelectPositions(rnd, symbols, selections)
+	width, size := hiddenSize, 256
+	selections := make([][]int, size)
+	for i := range selections {
+		selections[i] = make([]int, width)
+	}
+	SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
 
 	others := tf32.NewSet()
 	others.Add("input", width, size)
@@ -92,10 +94,6 @@ func ProbabilisticTransformer(hiddenSize int) {
 
 	alpha, eta, iterations := float32(.05), float32(.05), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
-	encodings := make([]float32, 2*symbols)
-	for i := range encodings {
-		encodings[i] = float32(math.Abs(rnd.NormFloat64()))
-	}
 	i := 0
 	for i < 5*len(images.Train.Images) {
 		index := rand.Intn(len(images.Train.Images))
@@ -110,8 +108,11 @@ func ProbabilisticTransformer(hiddenSize int) {
 			outputs.X[j] = 0
 		}
 
-		for j, selection := range selections {
-			inputs.X[j] = float32(image[selection])
+		for j, set := range selections {
+			for i, value := range set {
+				inputs.X[j*width+i] =
+					float32(image[value])
+			}
 		}
 		outputs.X[int(images.Train.Labels[index])] = 1
 		PositionEncoding(inputs)
@@ -178,10 +179,12 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	if err != nil {
 		panic(err)
 	}
-	width, size := 1, 256
-	selections := make([]int, size)
-	symbols := images.Train.Width * images.Train.Height
-	SelectPositions(rnd, symbols, selections)
+	width, size := hiddenSize, 256
+	selections := make([][]int, size)
+	for i := range selections {
+		selections[i] = make([]int, width)
+	}
+	SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
 	others := tf32.NewSet()
 	others.Add("input", width, size)
 	others.Add("dk", size, 1)
@@ -219,8 +222,10 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 		inputs.X[j] = 0
 	}
 
-	for j, selection := range selections {
-		inputs.X[j] = float32(image[selection])
+	for j, set := range selections {
+		for i, value := range set {
+			inputs.X[j*width+i] = float32(image[value])
+		}
 	}
 	PositionEncoding(inputs)
 
