@@ -48,11 +48,9 @@ func ProbabilisticTransformer(hiddenSize int) {
 	}
 
 	set := tf32.NewSet()
-	set.Add("embedding", width, hiddenSize)
-	set.Add("bias1", hiddenSize, 1)
-	set.Add("query", hiddenSize, hiddenSize)
-	set.Add("key", hiddenSize, hiddenSize)
-	set.Add("value", hiddenSize, hiddenSize)
+	set.Add("query", width, hiddenSize)
+	set.Add("key", width, hiddenSize)
+	set.Add("value", width, hiddenSize)
 	set.Add("project", hiddenSize, 10)
 	set.Add("bias", 10, 1)
 
@@ -76,14 +74,16 @@ func ProbabilisticTransformer(hiddenSize int) {
 	softmax := tf32.U(Softmax)
 	mask := tf32.U(Mask)
 
-	input := tf32.Add(tf32.Mul(set.Get("embedding"), others.Get("input")), set.Get("bias1"))
+	input := others.Get("input")
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
 	l1 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value)))
 	l2 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))))
 
-	cost := tf32.Sum(tf32.CrossEntropy(l2, others.Get("output")))
+	regularization := tf32.Add(tf32.Sum(tf32.Abs(set.Get("query"))), tf32.Sum(tf32.Abs(set.Get("key"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value"))))
+	cost := tf32.Hadamard(tf32.Sum(tf32.CrossEntropy(l2, others.Get("output"))), regularization)
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -207,7 +207,7 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	softmax := tf32.U(Softmax)
 	mask := tf32.U(Mask)
 
-	input := tf32.Add(tf32.Mul(set.Get("embedding"), others.Get("input")), set.Get("bias1"))
+	input := others.Get("input")
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
