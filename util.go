@@ -157,6 +157,27 @@ func Softmax(k tf32.Continuation, a *tf32.V) bool {
 	return false
 }
 
+// ReLu is the rectified linear unit function
+func ReLu(k tf32.Continuation, a *tf32.V) bool {
+	c := tf32.NewV(a.S[0], a.S[1])
+	for _, j := range a.X {
+		max := j
+		if max < 0 {
+			max = 0
+		}
+		c.X = append(c.X, max)
+	}
+	if k(&c) {
+		return true
+	}
+	for i, j := range c.D {
+		if c.X[i] != 0 {
+			a.D[i>>1] += j
+		}
+	}
+	return false
+}
+
 // SelectPositions selects the positions of input data
 func SelectPositions(rnd *rand.Rand, width, height int, positions [][]int) {
 	for _, set := range positions {

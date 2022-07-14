@@ -39,6 +39,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	others.Add("input", width, size)
 	others.Add("output", 10, 1)
 	others.Add("dk", size, 1)
+	others.Add("alpha", 1, 1)
 
 	for _, w := range others.Weights {
 		w.X = w.X[:cap(w.X)]
@@ -47,17 +48,18 @@ func ProbabilisticTransformer(hiddenSize int) {
 	for i := range dk.X {
 		dk.X[i] = 1 / float32(size)
 	}
+	others.ByName["alpha"].X[0] = 0.1
 
 	set := tf32.NewSet()
 	set.Add("query", width, hiddenSize)
 	set.Add("key", width, hiddenSize)
-	set.Add("value", width, hiddenSize)
-	set.Add("project", hiddenSize, hiddenSize)
-	set.Add("bias", hiddenSize, 1)
-	set.Add("query1", hiddenSize, hiddenSize)
-	set.Add("key1", hiddenSize, hiddenSize)
-	set.Add("value1", hiddenSize, hiddenSize)
-	set.Add("project1", hiddenSize, 10)
+	set.Add("value", width, width)
+	set.Add("project", width, width)
+	set.Add("bias", width, 1)
+	set.Add("query1", width, hiddenSize)
+	set.Add("key1", width, hiddenSize)
+	set.Add("value1", width, width)
+	set.Add("project1", width, 10)
 	set.Add("bias1", 10, 1)
 
 	for _, w := range set.Weights {
@@ -84,20 +86,25 @@ func ProbabilisticTransformer(hiddenSize int) {
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
-	l1 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value)))
-	l2 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias")))
+	l1 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value))), input)
+	l2 := tf32.Add(tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))), l1)
 	query1 := tf32.Mul(set.Get("query1"), l2)
 	key1 := tf32.Mul(set.Get("key1"), l2)
 	value1 := tf32.Mul(set.Get("value1"), l2)
-	l3 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1)))
-	l4 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project1"), l3), set.Get("bias1"))))
+	l3 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1))), l2)
+	l4 := mask(tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project1"), l3), set.Get("bias1"))))
 
 	regularization := tf32.Add(tf32.Sum(tf32.Abs(set.Get("query"))), tf32.Sum(tf32.Abs(set.Get("key"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("project"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("bias"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("query1"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("key1"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value1"))))
-	cost := tf32.Hadamard(tf32.Sum(tf32.CrossEntropy(l4, others.Get("output"))), regularization)
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("project1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("bias1"))))
+	regularization = tf32.Hadamard(regularization, others.Get("alpha"))
+	cost := tf32.Add(tf32.Sum(tf32.Quadratic(l4, others.Get("output"))), regularization)
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -110,7 +117,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < 5*len(images.Train.Images) {
-		index := rand.Intn(len(images.Train.Images))
+		index := rnd.Intn(len(images.Train.Images))
 		image := images.Train.Images[index]
 		total := float32(0.0)
 		set.Zero()
@@ -225,13 +232,13 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
-	l1 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value)))
-	l2 := tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias")))
+	l1 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value))), input)
+	l2 := tf32.Add(tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))), l1)
 	query1 := tf32.Mul(set.Get("query1"), l2)
 	key1 := tf32.Mul(set.Get("key1"), l2)
 	value1 := tf32.Mul(set.Get("value1"), l2)
-	l3 := tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1)))
-	l4 := mask(tf32.Softmax(tf32.Add(tf32.Mul(set.Get("project1"), l3), set.Get("bias1"))))
+	l3 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1))), l2)
+	l4 := mask(tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project1"), l3), set.Get("bias1"))))
 
 	image := images.Test.Images[test]
 	fmt.Println(images.Test.Labels[test])
