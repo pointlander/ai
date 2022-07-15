@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/pointlander/datum/mnist"
@@ -37,7 +38,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 
 	others := tf32.NewSet()
 	others.Add("input", width, size)
-	others.Add("output", 10, 1)
+	others.Add("output", 10, size)
 	others.Add("dk", size, 1)
 	others.Add("alpha", 1, 1)
 
@@ -54,16 +55,20 @@ func ProbabilisticTransformer(hiddenSize int) {
 	set.Add("query", width, hiddenSize)
 	set.Add("key", width, hiddenSize)
 	set.Add("value", width, width)
-	set.Add("project", width, width)
-	set.Add("bias", width, 1)
+	set.Add("W1_1", width, width)
+	set.Add("b1_1", width, 1)
+	set.Add("W1_2", width, width)
+	set.Add("b1_2", width, 1)
 	set.Add("query1", width, hiddenSize)
 	set.Add("key1", width, hiddenSize)
 	set.Add("value1", width, width)
-	set.Add("project1", width, 10)
-	set.Add("bias1", 10, 1)
+	set.Add("W2_1", width, width)
+	set.Add("b2_1", width, 1)
+	set.Add("W2_2", width, 10)
+	set.Add("b2_2", 10, 1)
 
 	for _, w := range set.Weights {
-		if w.N == "bias" || w.N == "bias1" {
+		if strings.HasPrefix(w.N, "b") {
 			w.X = w.X[:cap(w.X)]
 			continue
 		}
@@ -80,29 +85,34 @@ func ProbabilisticTransformer(hiddenSize int) {
 
 	//quadratic := tf32.B(Quadratic)
 	softmax := tf32.U(Softmax)
-	mask := tf32.U(Mask)
+	relu := tf32.U(ReLu)
+	//mask := tf32.U(Mask)
 
 	input := others.Get("input")
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
 	l1 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value))), input)
-	l2 := tf32.Add(tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))), l1)
+	l2 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W1_2"), relu(tf32.Add(tf32.Mul(set.Get("W1_1"), l1), set.Get("b1_1")))), set.Get("b1_2")), l1)
 	query1 := tf32.Mul(set.Get("query1"), l2)
 	key1 := tf32.Mul(set.Get("key1"), l2)
 	value1 := tf32.Mul(set.Get("value1"), l2)
 	l3 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1))), l2)
-	l4 := mask(tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project1"), l3), set.Get("bias1"))))
+	l4 := tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), l3), set.Get("b2_1")))), set.Get("b2_2"))
 
 	regularization := tf32.Add(tf32.Sum(tf32.Abs(set.Get("query"))), tf32.Sum(tf32.Abs(set.Get("key"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value"))))
-	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("project"))))
-	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("bias"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W1_1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b1_1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W1_2"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b1_2"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("query1"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("key1"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value1"))))
-	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("project1"))))
-	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("bias1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W2_1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b2_1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W2_2"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b2_2"))))
 	regularization = tf32.Hadamard(regularization, others.Get("alpha"))
 	cost := tf32.Add(tf32.Sum(tf32.Quadratic(l4, others.Get("output"))), regularization)
 
@@ -113,7 +123,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.00001), float32(.00001), len(images.Train.Images)
+	alpha, eta, iterations := float32(.0001), float32(.0001), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < 5*len(images.Train.Images) {
@@ -134,8 +144,8 @@ func ProbabilisticTransformer(hiddenSize int) {
 				inputs.X[j*width+i] =
 					float32(image[value])
 			}
+			outputs.X[j*10+int(images.Train.Labels[index])] = 1
 		}
-		outputs.X[int(images.Train.Labels[index])] = 1
 		PositionEncoding(inputs)
 
 		total += tf32.Gradient(cost).X[0]
@@ -226,19 +236,20 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 
 	//quadratic := tf32.B(Quadratic)
 	softmax := tf32.U(Softmax)
-	mask := tf32.U(Mask)
+	relu := tf32.U(ReLu)
+	//mask := tf32.U(Mask)
 
 	input := others.Get("input")
 	query := tf32.Mul(set.Get("query"), input)
 	key := tf32.Mul(set.Get("key"), input)
 	value := tf32.Mul(set.Get("value"), input)
 	l1 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value))), input)
-	l2 := tf32.Add(tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project"), l1), set.Get("bias"))), l1)
+	l2 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W1_2"), relu(tf32.Add(tf32.Mul(set.Get("W1_1"), l1), set.Get("b1_1")))), set.Get("b1_2")), l1)
 	query1 := tf32.Mul(set.Get("query1"), l2)
 	key1 := tf32.Mul(set.Get("key1"), l2)
 	value1 := tf32.Mul(set.Get("value1"), l2)
 	l3 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1))), l2)
-	l4 := mask(tf32.Sigmoid(tf32.Add(tf32.Mul(set.Get("project1"), l3), set.Get("bias1"))))
+	l4 := tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), l3), set.Get("b2_1")))), set.Get("b2_2"))
 
 	image := images.Test.Images[test]
 	fmt.Println(images.Test.Labels[test])
@@ -260,9 +271,11 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	PositionEncoding(inputs)
 
 	l4(func(a *tf32.V) bool {
-		for j := 0; j < 10; j++ {
-			histogram[j].Probability += a.X[j]
-			histogram[j].Index = j
+		for i := 0; i < size; i++ {
+			for j := 0; j < 10; j++ {
+				histogram[j].Probability += a.X[i*10+j]
+				histogram[j].Index = j
+			}
 		}
 		return true
 	})
