@@ -38,7 +38,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 
 	others := tf32.NewSet()
 	others.Add("input", width, size)
-	others.Add("output", 10, size)
+	others.Add("output", 10, 1)
 	others.Add("dk", size, 1)
 	others.Add("alpha", 1, 1)
 
@@ -49,7 +49,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	for i := range dk.X {
 		dk.X[i] = 1 / float32(size)
 	}
-	others.ByName["alpha"].X[0] = 0.1
+	others.ByName["alpha"].X[0] = 0.01
 
 	set := tf32.NewSet()
 	set.Add("query", width, hiddenSize)
@@ -86,7 +86,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	//quadratic := tf32.B(Quadratic)
 	softmax := tf32.U(Softmax)
 	relu := tf32.U(ReLu)
-	//mask := tf32.U(Mask)
+	mask := tf32.U(Mask)
 
 	input := others.Get("input")
 	query := tf32.Mul(set.Get("query"), input)
@@ -98,9 +98,9 @@ func ProbabilisticTransformer(hiddenSize int) {
 	key1 := tf32.Mul(set.Get("key1"), l2)
 	value1 := tf32.Mul(set.Get("value1"), l2)
 	l3 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1))), l2)
-	l4 := tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), l3), set.Get("b2_1")))), set.Get("b2_2"))
+	l4 := mask(tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), l3), set.Get("b2_1")))), set.Get("b2_2")))
 
-	regularization := tf32.Add(tf32.Sum(tf32.Abs(set.Get("query"))), tf32.Sum(tf32.Abs(set.Get("key"))))
+	/*regularization := tf32.Add(tf32.Sum(tf32.Abs(set.Get("query"))), tf32.Sum(tf32.Abs(set.Get("key"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W1_1"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b1_1"))))
@@ -114,7 +114,8 @@ func ProbabilisticTransformer(hiddenSize int) {
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W2_2"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b2_2"))))
 	regularization = tf32.Hadamard(regularization, others.Get("alpha"))
-	cost := tf32.Add(tf32.Sum(tf32.Quadratic(l4, others.Get("output"))), regularization)
+	cost := tf32.Add(tf32.Sum(tf32.Quadratic(l4, others.Get("output"))), regularization)*/
+	cost := tf32.Sum(tf32.Quadratic(l4, others.Get("output")))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -123,7 +124,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.0001), float32(.0001), len(images.Train.Images)
+	alpha, eta, iterations := float32(.001), float32(.001), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	for i < 5*len(images.Train.Images) {
@@ -144,9 +145,20 @@ func ProbabilisticTransformer(hiddenSize int) {
 				inputs.X[j*width+i] =
 					float32(image[value])
 			}
-			outputs.X[j*10+int(images.Train.Labels[index])] = 1
 		}
-		PositionEncoding(inputs)
+		outputs.X[int(images.Train.Labels[index])] = 1
+		SelectedPositionEncoding(selections, inputs)
+		statistics := make([]Statistics, width)
+		for j := 0; j < len(inputs.X); j += width {
+			for k := 0; k < width; k++ {
+				statistics[k].Add(float64(inputs.X[j+k]))
+			}
+		}
+		for j := 0; j < len(inputs.X); j += width {
+			for k := 0; k < width; k++ {
+				inputs.X[j+k] = float32((float64(inputs.X[j+k]) - statistics[k].Average()) / statistics[k].StandardDeviation())
+			}
+		}
 
 		total += tf32.Gradient(cost).X[0]
 		sum := float32(0.0)
@@ -237,7 +249,7 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	//quadratic := tf32.B(Quadratic)
 	softmax := tf32.U(Softmax)
 	relu := tf32.U(ReLu)
-	//mask := tf32.U(Mask)
+	mask := tf32.U(Mask)
 
 	input := others.Get("input")
 	query := tf32.Mul(set.Get("query"), input)
@@ -249,38 +261,68 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	key1 := tf32.Mul(set.Get("key1"), l2)
 	value1 := tf32.Mul(set.Get("value1"), l2)
 	l3 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1))), l2)
-	l4 := tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), l3), set.Get("b2_1")))), set.Get("b2_2"))
-
-	image := images.Test.Images[test]
-	fmt.Println(images.Test.Labels[test])
+	l4 := mask(tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), l3), set.Get("b2_1")))), set.Get("b2_2")))
 
 	type Result struct {
 		Probability float32
 		Index       int
 	}
-	histogram := make([]Result, 10)
-	for j := range inputs.X {
-		inputs.X[j] = 0
-	}
 
-	for j, set := range selections {
-		for i, value := range set {
-			inputs.X[j*width+i] = float32(image[value])
+	process := func(test int) []Result {
+		histogram := make([]Result, 10)
+		image := images.Test.Images[test]
+
+		//for i := 0; i < 32; i++ {
+		for j := range inputs.X {
+			inputs.X[j] = 0
 		}
-	}
-	PositionEncoding(inputs)
-
-	l4(func(a *tf32.V) bool {
-		for i := 0; i < size; i++ {
-			for j := 0; j < 10; j++ {
-				histogram[j].Probability += a.X[i*10+j]
-				histogram[j].Index = j
+		for j, set := range selections {
+			for i, value := range set {
+				inputs.X[j*width+i] = float32(image[value])
 			}
 		}
-		return true
-	})
-	sort.Slice(histogram, func(i, j int) bool {
-		return histogram[i].Probability > histogram[j].Probability
-	})
-	fmt.Println(histogram)
+		SelectedPositionEncoding(selections, inputs)
+		statistics := make([]Statistics, width)
+		for j := 0; j < len(inputs.X); j += width {
+			for k := 0; k < width; k++ {
+				statistics[k].Add(float64(inputs.X[j+k]))
+			}
+		}
+		for j := 0; j < len(inputs.X); j += width {
+			for k := 0; k < width; k++ {
+				inputs.X[j+k] = float32((float64(inputs.X[j+k]) - statistics[k].Average()) / statistics[k].StandardDeviation())
+			}
+		}
+
+		l4(func(a *tf32.V) bool {
+			for j := 0; j < 10; j++ {
+				histogram[j].Probability += a.X[j]
+				histogram[j].Index = j
+			}
+			return true
+		})
+		//}
+		return histogram
+	}
+
+	if test == -1 {
+		correct := 0
+		for i := range images.Test.Images {
+			histogram := process(i)
+			sort.Slice(histogram, func(i, j int) bool {
+				return histogram[i].Probability > histogram[j].Probability
+			})
+			if histogram[0].Index == int(images.Test.Labels[i]) {
+				correct++
+			}
+		}
+		fmt.Println(correct, len(images.Test.Images))
+	} else {
+		fmt.Println(images.Test.Labels[test])
+		histogram := process(test)
+		sort.Slice(histogram, func(i, j int) bool {
+			return histogram[i].Probability > histogram[j].Probability
+		})
+		fmt.Println(histogram)
+	}
 }

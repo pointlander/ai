@@ -23,6 +23,8 @@ var (
 	FlagFFT = flag.Bool("fft", false, "FFT mode")
 	// FlagTransformer is a flag to run the transformer mode
 	FlagTransformer = flag.Bool("transformer", false, "transformer mode")
+	// FlagTest is a flag to run the test mode
+	FlagTest = flag.Int("test", -1, "test mode")
 )
 
 func main() {
@@ -57,6 +59,6 @@ func main() {
 	if *FlagTransformer {
 		ProbabilisticTransformer(32)
 	} else if *FlagName != "" {
-		InferenceProbabilisticTransformer(0, *FlagName, 32)
+		InferenceProbabilisticTransformer(*FlagTest, *FlagName, 32)
 	}
 }

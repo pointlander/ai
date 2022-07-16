@@ -32,16 +32,16 @@ func PositionEncoding(input *tf32.V) {
 }
 
 // SelectedPositionEncoding add position encoding to vector for positions
-func SelectedPositionEncoding(positions []int, input *tf32.V) {
+func SelectedPositionEncoding(positions [][]int, input *tf32.V) {
 	length, d, t := len(input.X), input.S[0], 0
 	for i := 0; i < length; i += d {
 		k := 0.0
 		for j := 0; j < d; j++ {
-			position := float64(positions[t]) / 4096
+			position := float64(positions[t][j])
 			if j&1 == 0 {
-				input.X[i+j] += float32(math.Sin(math.Pow(10000, -2*k/float64(d)) * position))
+				input.X[i+j] += float32(math.Sin(math.Pow(8*4096, -2*k/float64(d)) * position))
 			} else {
-				input.X[i+j] += float32(math.Cos(math.Pow(10000, -2*k/float64(d)) * position))
+				input.X[i+j] += float32(math.Cos(math.Pow(8*4096, -2*k/float64(d)) * position))
 				k++
 			}
 		}
@@ -183,8 +183,14 @@ func SelectPositions(rnd *rand.Rand, width, height int, positions [][]int) {
 	for _, set := range positions {
 		for i := range set {
 			x, y := rnd.Intn(width), rnd.Intn(height)
-			x = (x + int(rnd.NormFloat64()*float64(width/8)) + width) % width
-			y = (x + int(rnd.NormFloat64()*float64(height/8)) + height) % height
+			x = (x + int(rnd.NormFloat64()*float64(width/8))) % width
+			y = (y + int(rnd.NormFloat64()*float64(height/8))) % height
+			if x < 0 {
+				x = -x
+			}
+			if y < 0 {
+				y = -y
+			}
 			set[i] = y*width + x
 		}
 		sort.Ints(set)
