@@ -24,7 +24,8 @@ import (
 
 // ProbabilisticTransformer is a probabilistic transformer
 func ProbabilisticTransformer(hiddenSize int) {
-	// 5329 10000
+	// 5329 10000 SelectedPositionEncoding
+	// 5108 10000 PositionEncoding
 	rnd := rand.New(rand.NewSource(1))
 	images, err := mnist.Load()
 	if err != nil {
