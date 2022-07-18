@@ -211,3 +211,43 @@ func Mask(k tf32.Continuation, a *tf32.V) bool {
 	}
 	return false
 }
+
+// Normalize normalizes the input data
+func Normalize(k tf32.Continuation, a *tf32.V) bool {
+	size, width, n := len(a.X), a.S[0], float32(a.S[1])
+	c, mean := tf32.NewV(a.S...), make([]float32, width)
+	c.X = c.X[:cap(c.X)]
+	for i := 0; i < size; i += width {
+		for j, ax := range a.X[i : i+width] {
+			mean[j] += ax
+		}
+	}
+	for i := 0; i < width; i++ {
+		mean[i] /= n
+	}
+	deviation := make([]float32, width)
+	for i := 0; i < size; i += width {
+		for j, ax := range a.X[i : i+width] {
+			diff := (ax - mean[j])
+			deviation[j] += diff * diff
+		}
+	}
+	for i := 0; i < width; i++ {
+		deviation[i] = float32(math.Sqrt(float64(deviation[i] / n)))
+	}
+	for i := 0; i < size; i += width {
+		for j, ax := range a.X[i : i+width] {
+			c.X = append(c.X, (ax-mean[j])/deviation[j])
+		}
+	}
+	if k(&c) {
+		return true
+	}
+	for i := 0; i < size; i += width {
+		for j := range a.D[i : i+width] {
+			u, s, x := mean[j], deviation[j], a.X[i+j]
+			a.D[i+j] += c.D[i+j] * (n*n*s*s - n*s*s - n*u*u + n*u*x + u*x - x*x) / (n * n * s * s * s)
+		}
+	}
+	return false
+}
