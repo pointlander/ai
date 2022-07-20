@@ -212,11 +212,34 @@ func Mask(k tf32.Continuation, a *tf32.V) bool {
 	return false
 }
 
+// AverageRows averages the rows of a tensor
+func AverageRows(k tf32.Continuation, a *tf32.V) bool {
+	size, width, n := len(a.X), a.S[0], float32(a.S[1])
+	c := tf32.NewV(width)
+	c.X = c.X[:cap(c.X)]
+	for i := 0; i < size; i += width {
+		for j, ax := range a.X[i : i+width] {
+			c.X[j] += ax
+		}
+	}
+	for i := 0; i < width; i++ {
+		c.X[i] /= n
+	}
+	if k(&c) {
+		return true
+	}
+	for i := 0; i < size; i += width {
+		for j := range a.D[i : i+width] {
+			a.D[i+j] += c.D[j] / n
+		}
+	}
+	return false
+}
+
 // Normalize normalizes the input data
 func Normalize(k tf32.Continuation, a *tf32.V) bool {
 	size, width, n := len(a.X), a.S[0], float32(a.S[1])
 	c, mean := tf32.NewV(a.S...), make([]float32, width)
-	c.X = c.X[:cap(c.X)]
 	for i := 0; i < size; i += width {
 		for j, ax := range a.X[i : i+width] {
 			mean[j] += ax
