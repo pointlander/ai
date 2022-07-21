@@ -27,6 +27,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	// 5329 10000 SelectedPositionEncoding
 	// 5108 10000 PositionEncoding
 	// 7092 10000 Normalization
+	// 7099 10000 SelectedPositionEncoding
 	rnd := rand.New(rand.NewSource(1))
 	images, err := mnist.Load()
 	if err != nil {
