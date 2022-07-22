@@ -28,6 +28,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	// 5108 10000 PositionEncoding
 	// 7092 10000 Normalization
 	// 7099 10000 SelectedPositionEncoding
+	// 5377 10000 SelectedPositionEncoding per image
 	rnd := rand.New(rand.NewSource(1))
 	images, err := mnist.Load()
 	if err != nil {
@@ -160,6 +161,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 			outputs.X[j] = 0
 		}
 
+		//SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
 		for j, set := range selections {
 			for i, value := range set {
 				inputs.X[j*width+i] =
@@ -307,6 +309,7 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 		image := images.Test.Images[test]
 
 		//for i := 0; i < 32; i++ {
+		//SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
 		for j := range inputs.X {
 			inputs.X[j] = 0
 		}
