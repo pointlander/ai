@@ -29,12 +29,13 @@ func ProbabilisticTransformer(hiddenSize int) {
 	// 7092 10000 Normalization
 	// 7099 10000 SelectedPositionEncoding
 	// 5377 10000 SelectedPositionEncoding per image
+	// 5825 10000 Embeddings
 	rnd := rand.New(rand.NewSource(1))
 	images, err := mnist.Load()
 	if err != nil {
 		panic(err)
 	}
-	width, size := hiddenSize, 256
+	width, size := 32, 256
 	selections := make([][]int, size)
 	for i := range selections {
 		selections[i] = make([]int, width)
@@ -57,29 +58,31 @@ func ProbabilisticTransformer(hiddenSize int) {
 	others.ByName["alpha"].X[0] = 0.01
 
 	set := tf32.NewSet()
-	set.Add("n1_1", width, 1)
-	set.Add("bn1_1", width, 1)
-	set.Add("query", width, hiddenSize)
-	set.Add("key", width, hiddenSize)
-	set.Add("value", width, width)
-	set.Add("n1_2", width, 1)
-	set.Add("bn1_2", width, 1)
-	set.Add("W1_1", width, width)
-	set.Add("b1_1", width, 1)
-	set.Add("W1_2", width, width)
-	set.Add("b1_2", width, 1)
-	set.Add("n2_1", width, 1)
-	set.Add("bn2_1", width, 1)
-	set.Add("query1", width, hiddenSize)
-	set.Add("key1", width, hiddenSize)
-	set.Add("value1", width, width)
-	set.Add("n2_2", width, 1)
-	set.Add("bn2_2", width, 1)
-	set.Add("W2_1", width, width)
-	set.Add("b2_1", width, 1)
-	set.Add("W2_2", width, width)
-	set.Add("b2_2", width, 1)
-	set.Add("project", width, 10)
+	set.Add("encode", width, hiddenSize)
+	set.Add("biasEncode", hiddenSize, 1)
+	set.Add("n1_1", hiddenSize, 1)
+	set.Add("bn1_1", hiddenSize, 1)
+	set.Add("query", hiddenSize, hiddenSize)
+	set.Add("key", hiddenSize, hiddenSize)
+	set.Add("value", hiddenSize, hiddenSize)
+	set.Add("n1_2", hiddenSize, 1)
+	set.Add("bn1_2", hiddenSize, 1)
+	set.Add("W1_1", hiddenSize, hiddenSize)
+	set.Add("b1_1", hiddenSize, 1)
+	set.Add("W1_2", hiddenSize, hiddenSize)
+	set.Add("b1_2", hiddenSize, 1)
+	set.Add("n2_1", hiddenSize, 1)
+	set.Add("bn2_1", hiddenSize, 1)
+	set.Add("query1", hiddenSize, hiddenSize)
+	set.Add("key1", hiddenSize, hiddenSize)
+	set.Add("value1", hiddenSize, hiddenSize)
+	set.Add("n2_2", hiddenSize, 1)
+	set.Add("bn2_2", hiddenSize, 1)
+	set.Add("W2_1", hiddenSize, hiddenSize)
+	set.Add("b2_1", hiddenSize, 1)
+	set.Add("W2_2", hiddenSize, hiddenSize)
+	set.Add("b2_2", hiddenSize, 1)
+	set.Add("project", hiddenSize, 10)
 	set.Add("bias", 10, 1)
 
 	for _, w := range set.Weights {
@@ -104,8 +107,9 @@ func ProbabilisticTransformer(hiddenSize int) {
 	mask := tf32.U(Mask)
 	norm := tf32.U(Normalize)
 	average := tf32.U(AverageRows)
+	encode := tf32.U(PositionEncodingLayer)
 
-	input := others.Get("input")
+	input := encode(relu(tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode"))))
 	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
 	query := tf32.Mul(set.Get("query"), norm_input)
 	key := tf32.Mul(set.Get("key"), norm_input)
@@ -170,7 +174,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 		}
 		outputs.X[int(images.Train.Labels[index])] = 1
 		//SelectedPositionEncoding(selections, inputs)
-		PositionEncoding(inputs)
+		//PositionEncoding(inputs)
 		/*statistics := make([]Statistics, width)
 		for j := 0; j < len(inputs.X); j += width {
 			for k := 0; k < width; k++ {
@@ -251,7 +255,7 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	if err != nil {
 		panic(err)
 	}
-	width, size := hiddenSize, 256
+	width, size := 32, 256
 	selections := make([][]int, size)
 	for i := range selections {
 		selections[i] = make([]int, width)
@@ -281,8 +285,9 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	mask := tf32.U(Mask)
 	norm := tf32.U(Normalize)
 	average := tf32.U(AverageRows)
+	encode := tf32.U(PositionEncodingLayer)
 
-	input := others.Get("input")
+	input := encode(relu(tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode"))))
 	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
 	query := tf32.Mul(set.Get("query"), norm_input)
 	key := tf32.Mul(set.Get("key"), norm_input)
@@ -319,7 +324,7 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 			}
 		}
 		//SelectedPositionEncoding(selections, inputs)
-		PositionEncoding(inputs)
+		//PositionEncoding(inputs)
 		/*statistics := make([]Statistics, width)
 		for j := 0; j < len(inputs.X); j += width {
 			for k := 0; k < width; k++ {

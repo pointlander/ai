@@ -197,6 +197,33 @@ func SelectPositions(rnd *rand.Rand, width, height int, positions [][]int) {
 	}
 }
 
+// PositionEncodingLayer add position encoding to vector
+func PositionEncodingLayer(k tf32.Continuation, a *tf32.V) bool {
+	c := tf32.NewV(a.S...)
+	length, width, t := len(a.X), a.S[0], 0.0
+	for i := 0; i < length; i += width {
+		k := 0.0
+		for j := 0; j < width; j++ {
+			if j&1 == 0 {
+				c.X = append(c.X, a.X[i+j]+float32(math.Sin(math.Pow(10000, -2*k/float64(width))*t)))
+			} else {
+				c.X = append(c.X, a.X[i+j]+float32(math.Cos(math.Pow(10000, -2*k/float64(width))*t)))
+				k++
+			}
+		}
+		t++
+	}
+	if k(&c) {
+		return true
+	}
+	for i := 0; i < length; i += width {
+		for j := range a.D[i : i+width] {
+			a.D[i+j] += c.D[i+j]
+		}
+	}
+	return false
+}
+
 // Mask masks the input data
 func Mask(k tf32.Continuation, a *tf32.V) bool {
 	c := tf32.NewV(10, 1)
