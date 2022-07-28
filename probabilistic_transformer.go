@@ -53,7 +53,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 	}
 	inputs, outputs, dk := others.ByName["input"], others.ByName["output"], others.ByName["dk"]
 	for i := range dk.X {
-		dk.X[i] = 1 / float32(size)
+		dk.X[i] = 1 / float32(hiddenSize)
 	}
 	others.ByName["alpha"].X[0] = 0.01
 
@@ -90,7 +90,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 			w.X = w.X[:cap(w.X)]
 			continue
 		}
-		factor := math.Sqrt(2.0 / float64(size*size))
+		factor := math.Sqrt(2.0 / float64(hiddenSize*hiddenSize))
 		for i := 0; i < cap(w.X); i++ {
 			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
 		}
