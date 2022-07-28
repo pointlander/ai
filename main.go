@@ -25,6 +25,8 @@ var (
 	FlagTransformer = flag.Bool("transformer", false, "transformer mode")
 	// FlagTest is a flag to run the test mode
 	FlagTest = flag.Int("test", -1, "test mode")
+	// FlagHeads is a flag to set the number of heads
+	FlagHeads = flag.Int("heads", 1, "number of heads")
 )
 
 func main() {
@@ -57,8 +59,10 @@ func main() {
 
 	//Transformer(32)
 	if *FlagTransformer {
-		ProbabilisticTransformer(128)
+		for i := 0; i < *FlagHeads; i++ {
+			ProbabilisticTransformer(i, 128)
+		}
 	} else if *FlagName != "" {
-		InferenceProbabilisticTransformer(*FlagTest, *FlagName, 128)
+		InferenceProbabilisticTransformer(*FlagHeads, *FlagTest, *FlagName, 128)
 	}
 }
