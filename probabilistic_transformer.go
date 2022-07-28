@@ -59,7 +59,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 
 	set := tf32.NewSet()
 	set.Add("encode", width, hiddenSize)
-	set.Add("biasEncode", hiddenSize, 1)
+	set.Add("biasEncode", hiddenSize, size)
 	set.Add("n1_1", hiddenSize, 1)
 	set.Add("bn1_1", hiddenSize, 1)
 	set.Add("query", hiddenSize, hiddenSize)
@@ -107,9 +107,9 @@ func ProbabilisticTransformer(hiddenSize int) {
 	mask := tf32.U(Mask)
 	norm := tf32.U(Normalize)
 	average := tf32.U(AverageRows)
-	encode := tf32.U(PositionEncodingLayer)
+	//encode := tf32.U(PositionEncodingLayer)
 
-	input := encode(relu(tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode"))))
+	input := relu(tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode")))
 	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
 	query := tf32.Mul(set.Get("query"), norm_input)
 	key := tf32.Mul(set.Get("key"), norm_input)
@@ -218,6 +218,7 @@ func ProbabilisticTransformer(hiddenSize int) {
 		}
 
 		if halt || math.IsNaN(float64(total)) {
+			fmt.Println(total)
 			break
 		}
 		if i%1000 == 0 {
@@ -285,9 +286,9 @@ func InferenceProbabilisticTransformer(test int, name string, hiddenSize int) {
 	mask := tf32.U(Mask)
 	norm := tf32.U(Normalize)
 	average := tf32.U(AverageRows)
-	encode := tf32.U(PositionEncodingLayer)
+	//encode := tf32.U(PositionEncodingLayer)
 
-	input := encode(relu(tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode"))))
+	input := relu(tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode")))
 	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
 	query := tf32.Mul(set.Get("query"), norm_input)
 	key := tf32.Mul(set.Get("key"), norm_input)

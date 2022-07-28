@@ -57,8 +57,8 @@ func main() {
 
 	//Transformer(32)
 	if *FlagTransformer {
-		ProbabilisticTransformer(64)
+		ProbabilisticTransformer(128)
 	} else if *FlagName != "" {
-		InferenceProbabilisticTransformer(*FlagTest, *FlagName, 64)
+		InferenceProbabilisticTransformer(*FlagTest, *FlagName, 128)
 	}
 }

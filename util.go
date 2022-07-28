@@ -284,6 +284,9 @@ func Normalize(k tf32.Continuation, a *tf32.V) bool {
 	}
 	for i := 0; i < width; i++ {
 		deviation[i] = float32(math.Sqrt(float64(deviation[i] / n)))
+		if deviation[i] == 0 {
+			deviation[i] = 0.001
+		}
 	}
 	for i := 0; i < size; i += width {
 		for j, ax := range a.X[i : i+width] {
