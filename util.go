@@ -188,22 +188,24 @@ type Position struct {
 
 // SelectPositions selects the positions of input data
 func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
-	for _, set := range positions {
+	for s, set := range positions {
+		x, y := rnd.Intn(width), rnd.Intn(height)
 		for i := range set.Positions {
-			x, y := rnd.Intn(width), rnd.Intn(height)
-			x = (x + int(rnd.NormFloat64()*float64(width/8))) % width
-			y = (y + int(rnd.NormFloat64()*float64(height/8))) % height
-			if x < 0 {
-				x = -x
+			xx := (x + int(rnd.NormFloat64()*float64(width/8))) % width
+			yy := (y + int(rnd.NormFloat64()*float64(height/8))) % height
+			if xx < 0 {
+				xx = -xx
 			}
-			if y < 0 {
-				y = -y
+			if yy < 0 {
+				yy = -yy
 			}
-			set.Positions[i] = y*width + x
+			set.Positions[i] = yy*width + xx
 		}
 		sort.Ints(set.Positions)
+		positions[s].X = x
+		positions[s].X = y
 	}
-	/*for i, a := range positions {
+	for i, a := range positions {
 		if a.Crossed {
 			continue
 		}
@@ -227,7 +229,7 @@ func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
 		}
 		sort.Ints(positions[i].Positions)
 		sort.Ints(positions[closest].Positions)
-	}*/
+	}
 }
 
 // PositionEncodingLayer add position encoding to vector

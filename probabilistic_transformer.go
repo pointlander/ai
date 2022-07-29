@@ -35,7 +35,7 @@ func ProbabilisticTransformer(head int, hiddenSize int) {
 	if err != nil {
 		panic(err)
 	}
-	width, size := 32, 256
+	width, size := 32, 32
 	selections := make([]Position, size)
 	for i := range selections {
 		selections[i].Positions = make([]int, width)
@@ -255,7 +255,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int)
 	if err != nil {
 		panic(err)
 	}
-	width, size := 32, 256
+	width, size := 32, 32
 	type Head struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V
