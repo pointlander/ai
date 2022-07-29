@@ -32,12 +32,12 @@ func PositionEncoding(input *tf32.V) {
 }
 
 // SelectedPositionEncoding add position encoding to vector for positions
-func SelectedPositionEncoding(positions [][]int, input *tf32.V) {
+func SelectedPositionEncoding(positions []Position, input *tf32.V) {
 	length, d, t := len(input.X), input.S[0], 0
 	for i := 0; i < length; i += d {
 		k := 0.0
 		for j := 0; j < d; j++ {
-			position := float64(positions[t][j])
+			position := float64(positions[t].Positions[j])
 			if j&1 == 0 {
 				input.X[i+j] += float32(math.Sin(math.Pow(8*4096, -2*k/float64(d)) * position))
 			} else {
@@ -178,10 +178,18 @@ func ReLu(k tf32.Continuation, a *tf32.V) bool {
 	return false
 }
 
+// Position is a position
+type Position struct {
+	X         int
+	Y         int
+	Crossed   bool
+	Positions []int
+}
+
 // SelectPositions selects the positions of input data
-func SelectPositions(rnd *rand.Rand, width, height int, positions [][]int) {
+func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
 	for _, set := range positions {
-		for i := range set {
+		for i := range set.Positions {
 			x, y := rnd.Intn(width), rnd.Intn(height)
 			x = (x + int(rnd.NormFloat64()*float64(width/8))) % width
 			y = (y + int(rnd.NormFloat64()*float64(height/8))) % height
@@ -191,9 +199,9 @@ func SelectPositions(rnd *rand.Rand, width, height int, positions [][]int) {
 			if y < 0 {
 				y = -y
 			}
-			set[i] = y*width + x
+			set.Positions[i] = y*width + x
 		}
-		sort.Ints(set)
+		sort.Ints(set.Positions)
 	}
 }
 

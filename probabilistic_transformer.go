@@ -36,9 +36,9 @@ func ProbabilisticTransformer(head int, hiddenSize int) {
 		panic(err)
 	}
 	width, size := 32, 256
-	selections := make([][]int, size)
+	selections := make([]Position, size)
 	for i := range selections {
-		selections[i] = make([]int, width)
+		selections[i].Positions = make([]int, width)
 	}
 	SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
 
@@ -167,7 +167,7 @@ func ProbabilisticTransformer(head int, hiddenSize int) {
 
 		//SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
 		for j, set := range selections {
-			for i, value := range set {
+			for i, value := range set.Positions {
 				inputs.X[j*width+i] =
 					float32(image[value])
 			}
@@ -259,14 +259,14 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int)
 	type Head struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V
-		Selections [][]int
+		Selections []Position
 	}
 	heads := make([]Head, h)
 	for i := range heads {
 		rnd := rand.New(rand.NewSource(int64(i + 1)))
-		selections := make([][]int, size)
+		selections := make([]Position, size)
 		for i := range selections {
-			selections[i] = make([]int, width)
+			selections[i].Positions = make([]int, width)
 		}
 		SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
 		others := tf32.NewSet()
@@ -333,7 +333,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int)
 			head.Inputs.X[j] = 0
 		}
 		for j, set := range head.Selections {
-			for i, value := range set {
+			for i, value := range set.Positions {
 				head.Inputs.X[j*width+i] = float32(image[value])
 			}
 		}
