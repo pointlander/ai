@@ -203,6 +203,31 @@ func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
 		}
 		sort.Ints(set.Positions)
 	}
+	/*for i, a := range positions {
+		if a.Crossed {
+			continue
+		}
+		min, closest := math.MaxFloat64, 0
+		for j, b := range positions {
+			if i == j || b.Crossed {
+				continue
+			}
+			x1, x2, y1, y2 := float64(a.X), float64(b.X), float64(a.Y), float64(b.Y)
+			distance := math.Sqrt((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2))
+			if distance < min {
+				min, closest = distance, j
+			}
+		}
+		positions[i].Crossed = true
+		positions[closest].Crossed = true
+		for k, x := range positions[i].Positions {
+			if k&1 == 1 {
+				positions[i].Positions[k], positions[closest].Positions[k] = positions[closest].Positions[k], x
+			}
+		}
+		sort.Ints(positions[i].Positions)
+		sort.Ints(positions[closest].Positions)
+	}*/
 }
 
 // PositionEncodingLayer add position encoding to vector
