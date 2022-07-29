@@ -264,6 +264,11 @@ func AverageRows(k tf32.Continuation, a *tf32.V) bool {
 }
 
 // Normalize normalizes the input data
+// https://math.stackexchange.com/questions/4046499/partial-derivative-of-sample-standard-deviation-w-r-t-individual-data-points
+// (x - u)/s
+// (1 - 1/n)/s + (x - u)(2/n)(x/n - u)/(-2*s^3)
+// (1 - 1/n)/s - (x - u)(x/n - u)/(n*s^3)
+// (n^2 s^2 - n s^2 - n u^2 + n u x + u x - x^2)/(n^2 s^3)
 func Normalize(k tf32.Continuation, a *tf32.V) bool {
 	size, width, n := len(a.X), a.S[0], float32(a.S[1])
 	c, mean := tf32.NewV(a.S...), make([]float32, width)
