@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/cmplx"
 	"math/rand"
-	"sort"
 
 	"github.com/pointlander/gradient/tc128"
 	"github.com/pointlander/gradient/tf32"
@@ -188,7 +187,25 @@ type Position struct {
 
 // SelectPositions selects the positions of input data
 func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
-	for s, set := range positions {
+	w, h := width/7, height/7
+	pixel := 0
+	for _, set := range positions {
+		index := 0
+		for j := 0; j < width; j += w {
+			for k := 0; k < height; k += h {
+				x := j + (pixel % w)
+				y := k + (pixel / w)
+				//x := j + rnd.Intn(w)
+				//y := k + rnd.Intn(h)
+
+				set.Positions[index] = x + y*width
+				index++
+			}
+		}
+		pixel++
+		//sort.Ints(positions[i].Positions)
+	}
+	/*for s, set := range positions {
 		x, y := rnd.Intn(width), rnd.Intn(height)
 		for i := range set.Positions {
 			xx := (x + int(rnd.NormFloat64()*float64(width/8))) % width
@@ -229,7 +246,7 @@ func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
 		}
 		sort.Ints(positions[i].Positions)
 		sort.Ints(positions[closest].Positions)
-	}
+	}*/
 }
 
 // PositionEncodingLayer add position encoding to vector

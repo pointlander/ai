@@ -35,7 +35,7 @@ func ProbabilisticTransformer(head int, hiddenSize int) {
 	if err != nil {
 		panic(err)
 	}
-	width, size := 32, 32
+	width, size := 49, 16
 	selections := make([]Position, size)
 	for i := range selections {
 		selections[i].Positions = make([]int, width)
@@ -109,7 +109,7 @@ func ProbabilisticTransformer(head int, hiddenSize int) {
 	average := tf32.U(AverageRows)
 	//encode := tf32.U(PositionEncodingLayer)
 
-	input := relu(tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode")))
+	input := tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode"))
 	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
 	query := tf32.Mul(set.Get("query"), norm_input)
 	key := tf32.Mul(set.Get("key"), norm_input)
@@ -255,7 +255,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int)
 	if err != nil {
 		panic(err)
 	}
-	width, size := 32, 32
+	width, size := 49, 16
 	type Head struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V
@@ -295,7 +295,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int)
 		average := tf32.U(AverageRows)
 		//encode := tf32.U(PositionEncodingLayer)
 
-		input := relu(tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode")))
+		input := tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode"))
 		norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
 		query := tf32.Mul(set.Get("query"), norm_input)
 		key := tf32.Mul(set.Get("key"), norm_input)
