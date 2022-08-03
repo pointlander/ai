@@ -22,20 +22,41 @@ import (
 	"gonum.org/v1/plot/vg/draw"
 )
 
+// RegularAttention implements the attention mechanism described in
+// https://arxiv.org/abs/1706.03762?amp=1
+func RegularAttention(query, key, value, dk tf32.Meta) tf32.Meta {
+	softmax := tf32.U(Softmax)
+	return tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), dk)), tf32.T(value)))
+}
+
+// SimpleAttention implements the attention mechanism described in
+// https://openreview.net/forum?id=pW--cu2FCHY
+func SimpleAttention(query, key, value, dk tf32.Meta) tf32.Meta {
+	return tf32.Hadamard(tf32.Sigmoid(query), tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key))), value)))
+}
+
+// IdentityAttention implements an identity attention
+func IdentityAttention(query, key, value, dk tf32.Meta) tf32.Meta {
+	return value
+}
+
 // ProbabilisticTransformer is a probabilistic transformer
-func ProbabilisticTransformer(head int, hiddenSize int) {
+func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, key, value, dk tf32.Meta) tf32.Meta) {
 	// 5329 10000 SelectedPositionEncoding
 	// 5108 10000 PositionEncoding
 	// 7092 10000 Normalization
 	// 7099 10000 SelectedPositionEncoding
 	// 5377 10000 SelectedPositionEncoding per image
 	// 5825 10000 Embeddings
+	// 8001 10000 SimpleAttention
+	// 8001 10000 RegularAttention
+	// 8001 10000 IdentityAttention
 	rnd := rand.New(rand.NewSource(int64(head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
 		panic(err)
 	}
-	width, size := 49, 8
+	width, size := 49, 16
 	selections := make([]Position, size)
 	for i := range selections {
 		selections[i].Positions = make([]int, width)
@@ -102,7 +123,6 @@ func ProbabilisticTransformer(head int, hiddenSize int) {
 	}
 
 	//quadratic := tf32.B(Quadratic)
-	softmax := tf32.U(Softmax)
 	relu := tf32.U(ReLu)
 	mask := tf32.U(Mask)
 	norm := tf32.U(Normalize)
@@ -114,14 +134,14 @@ func ProbabilisticTransformer(head int, hiddenSize int) {
 	query := tf32.Mul(set.Get("query"), norm_input)
 	key := tf32.Mul(set.Get("key"), norm_input)
 	value := tf32.Mul(set.Get("value"), norm_input)
-	l1 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value))), input)
+	l1 := tf32.Add(attention(query, key, value, others.Get("dk")), input)
 	norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get("n1_2")), set.Get("bn1_2"))
 	l2 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W1_2"), relu(tf32.Add(tf32.Mul(set.Get("W1_1"), norm_l1), set.Get("b1_1")))), set.Get("b1_2")), l1)
 	norm_l2 := tf32.Add(tf32.Hadamard(norm(l2), set.Get("n2_1")), set.Get("bn2_1"))
 	query1 := tf32.Mul(set.Get("query1"), norm_l2)
 	key1 := tf32.Mul(set.Get("key1"), norm_l2)
 	value1 := tf32.Mul(set.Get("value1"), norm_l2)
-	l3 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1))), l2)
+	l3 := tf32.Add(attention(query1, key1, value1, others.Get("dk")), l2)
 	norm_l3 := tf32.Add(tf32.Hadamard(norm(l3), set.Get("n2_2")), set.Get("bn2_2"))
 	l4 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), norm_l3), set.Get("b2_1")))), set.Get("b2_2")), l3)
 	output := mask(average(tf32.Add(tf32.Mul(set.Get("project"), l4), set.Get("bias"))))
@@ -250,12 +270,12 @@ func ProbabilisticTransformer(head int, hiddenSize int) {
 }
 
 // InferenceProbabilisticTransformer is a probabilistic transformer inference
-func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int) {
+func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int, attention func(query, key, value, dk tf32.Meta) tf32.Meta) {
 	images, err := mnist.Load()
 	if err != nil {
 		panic(err)
 	}
-	width, size := 49, 8
+	width, size := 49, 16
 	type Head struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V
@@ -288,7 +308,6 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int)
 		}
 
 		//quadratic := tf32.B(Quadratic)
-		softmax := tf32.U(Softmax)
 		relu := tf32.U(ReLu)
 		mask := tf32.U(Mask)
 		norm := tf32.U(Normalize)
@@ -300,14 +319,14 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int)
 		query := tf32.Mul(set.Get("query"), norm_input)
 		key := tf32.Mul(set.Get("key"), norm_input)
 		value := tf32.Mul(set.Get("value"), norm_input)
-		l1 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), others.Get("dk"))), tf32.T(value))), input)
+		l1 := tf32.Add(attention(query, key, value, others.Get("dk")), input)
 		norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get("n1_2")), set.Get("bn1_2"))
 		l2 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W1_2"), relu(tf32.Add(tf32.Mul(set.Get("W1_1"), norm_l1), set.Get("b1_1")))), set.Get("b1_2")), l1)
 		norm_l2 := tf32.Add(tf32.Hadamard(norm(l2), set.Get("n2_1")), set.Get("bn2_1"))
 		query1 := tf32.Mul(set.Get("query1"), norm_l2)
 		key1 := tf32.Mul(set.Get("key1"), norm_l2)
 		value1 := tf32.Mul(set.Get("value1"), norm_l2)
-		l3 := tf32.Add(tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query1, key1), others.Get("dk"))), tf32.T(value1))), l2)
+		l3 := tf32.Add(attention(query1, key1, value1, others.Get("dk")), l2)
 		norm_l3 := tf32.Add(tf32.Hadamard(norm(l3), set.Get("n2_2")), set.Get("bn2_2"))
 		l4 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), norm_l3), set.Get("b2_1")))), set.Get("b2_2")), l3)
 		output := mask(average(tf32.Add(tf32.Mul(set.Get("project"), l4), set.Get("bias"))))
