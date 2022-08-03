@@ -51,12 +51,15 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 	// 8001 10000 SimpleAttention
 	// 8001 10000 RegularAttention
 	// 8001 10000 IdentityAttention
+	// 2003 10000 SimpleAttention without sort
+	// 2946 10000 RegularAttention with sort
+	// 1957 10000 RegularAttention without sort
 	rnd := rand.New(rand.NewSource(int64(head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
 		panic(err)
 	}
-	width, size := 49, 16
+	width, size := 36, 49
 	selections := make([]Position, size)
 	for i := range selections {
 		selections[i].Positions = make([]int, width)
@@ -275,7 +278,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 	if err != nil {
 		panic(err)
 	}
-	width, size := 49, 16
+	width, size := 36, 49
 	type Head struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V

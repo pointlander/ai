@@ -60,9 +60,9 @@ func main() {
 	//Transformer(32)
 	if *FlagTransformer {
 		for i := 0; i < *FlagHeads; i++ {
-			ProbabilisticTransformer(i, 128, SimpleAttention)
+			ProbabilisticTransformer(i, 128, RegularAttention)
 		}
 	} else if *FlagName != "" {
-		InferenceProbabilisticTransformer(*FlagHeads, *FlagTest, *FlagName, 128, SimpleAttention)
+		InferenceProbabilisticTransformer(*FlagHeads, *FlagTest, *FlagName, 128, RegularAttention)
 	}
 }

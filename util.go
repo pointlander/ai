@@ -188,7 +188,22 @@ type Position struct {
 // SelectPositions selects the positions of input data
 func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
 	w, h := width/7, height/7
-	pixel := 0
+	s := 0
+	for k := 0; k < height; k += h {
+		for j := 0; j < width; j += w {
+			set, index := positions[s], 0
+			for y := -1; y < h+1; y++ {
+				for x := -1; x < w+1; x++ {
+					x := (j + x + width) % width
+					y := (k + y + height) % height
+					set.Positions[index] = x + y*width
+					index++
+				}
+			}
+			s++
+		}
+	}
+	/*pixel := 0
 	for _, set := range positions {
 		index := 0
 		for j := 0; j < width; j += w {
@@ -204,7 +219,7 @@ func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
 		}
 		pixel++
 		//sort.Ints(positions[i].Positions)
-	}
+	}*/
 	/*for s, set := range positions {
 		x, y := rnd.Intn(width), rnd.Intn(height)
 		for i := range set.Positions {
