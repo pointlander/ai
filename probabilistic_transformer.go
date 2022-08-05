@@ -25,8 +25,8 @@ import (
 // RegularAttention implements the attention mechanism described in
 // https://arxiv.org/abs/1706.03762?amp=1
 func RegularAttention(query, key, value, dk tf32.Meta) tf32.Meta {
-	softmax := tf32.U(Softmax)
-	return tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), dk)), tf32.T(value)))
+	//softmax := tf32.U(Softmax)
+	return tf32.T(tf32.Mul(tf32.Softmax(tf32.Hadamard(tf32.Mul(query, key), dk)), tf32.T(value)))
 }
 
 // SimpleAttention implements the attention mechanism described in
@@ -59,8 +59,8 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 	if err != nil {
 		panic(err)
 	}
-	width, size := 36, 49
-	selections := make([]Position, size)
+	width, size := 49, 16+1
+	selections := make([]Position, size-1)
 	for i := range selections {
 		selections[i].Positions = make([]int, width)
 	}
@@ -83,6 +83,8 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 
 	set := tf32.NewSet()
 	set.Add("encode", width, hiddenSize)
+	set.Add("position", 8, size)
+	hiddenSize += 8
 	set.Add("biasEncode", hiddenSize, size)
 	set.Add("n1_1", hiddenSize, 1)
 	set.Add("bn1_1", hiddenSize, 1)
@@ -108,13 +110,15 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 	set.Add("b2_2", hiddenSize, 1)
 	set.Add("project", hiddenSize, 10)
 	set.Add("bias", 10, 1)
+	set.Add("project1", 10, 10)
+	set.Add("bias1", 10, 1)
 
 	for _, w := range set.Weights {
 		if strings.HasPrefix(w.N, "b") {
 			w.X = w.X[:cap(w.X)]
 			continue
 		}
-		factor := math.Sqrt(2.0 / float64(hiddenSize*hiddenSize))
+		factor := math.Sqrt(2.0 / float64(hiddenSize))
 		for i := 0; i < cap(w.X); i++ {
 			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
 		}
@@ -129,10 +133,11 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 	relu := tf32.U(ReLu)
 	mask := tf32.U(Mask)
 	norm := tf32.U(Normalize)
-	average := tf32.U(AverageRows)
+	//average := tf32.U(AverageRows)
 	//encode := tf32.U(PositionEncodingLayer)
+	concat := tf32.B(Concat)
 
-	input := tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode"))
+	input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
 	query := tf32.Mul(set.Get("query"), norm_input)
 	key := tf32.Mul(set.Get("key"), norm_input)
@@ -147,7 +152,7 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 	l3 := tf32.Add(attention(query1, key1, value1, others.Get("dk")), l2)
 	norm_l3 := tf32.Add(tf32.Hadamard(norm(l3), set.Get("n2_2")), set.Get("bn2_2"))
 	l4 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), norm_l3), set.Get("b2_1")))), set.Get("b2_2")), l3)
-	output := mask(average(tf32.Add(tf32.Mul(set.Get("project"), l4), set.Get("bias"))))
+	output := tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"), mask(l4)), set.Get("bias")))), set.Get("bias1"))
 
 	/*regularization := tf32.Add(tf32.Sum(tf32.Abs(set.Get("query"))), tf32.Sum(tf32.Abs(set.Get("key"))))
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value"))))
@@ -164,7 +169,7 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b2_2"))))
 	regularization = tf32.Hadamard(regularization, others.Get("alpha"))
 	cost := tf32.Add(tf32.Sum(tf32.Quadratic(l4, others.Get("output"))), regularization)*/
-	cost := tf32.Sum(tf32.Quadratic(output, others.Get("output")))
+	cost := tf32.Quadratic(output, others.Get("output"))
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -173,10 +178,11 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.001), float32(.001), len(images.Train.Images)
+	alpha, eta, iterations := float32(.01), float32(.01), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	total := float32(0.0)
+	reduced := false
 	for i < len(images.Train.Images) {
 		index := rnd.Intn(len(images.Train.Images))
 		image := images.Train.Images[index]
@@ -189,10 +195,13 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 		}
 
 		//SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
+		for j := 0; j < width; j++ {
+			inputs.X[j] = 1
+		}
 		for j, set := range selections {
 			for i, value := range set.Positions {
-				inputs.X[j*width+i] =
-					float32(image[value])
+				inputs.X[(j+1)*width+i] =
+					float32(image[value]) / 255
 			}
 		}
 		outputs.X[int(images.Train.Labels[index])] = 1
@@ -211,10 +220,23 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 		}*/
 
 		total += tf32.Gradient(cost).X[0]
+		for j, w := range set.Weights {
+			for k, d := range w.D {
+				deltas[j][k] += d
+			}
+		}
+		set.Zero()
+
 		if i > 0 && i%100 == 0 {
 			sum := float32(0.0)
-			for _, p := range set.Weights {
+			/*for _, p := range set.Weights {
 				for _, d := range p.D {
+					sum += d * d
+				}
+			}*/
+			for _, p := range deltas {
+				for _, d := range p {
+					d /= 100
 					sum += d * d
 				}
 			}
@@ -225,17 +247,21 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 			}
 
 			for j, w := range set.Weights {
-				for k, d := range w.D {
+				for k := range w.D {
 					//deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
 					//set.Weights[j].X[k] += deltas[j][k]
 					_ = alpha
-					set.Weights[j].X[k] -= eta * d * scaling
+					set.Weights[j].X[k] -= eta * deltas[j][k] / 100 * scaling
+					deltas[j][k] = 0
 				}
 			}
-
+			total /= 100
+			if !reduced && total < .5 {
+				reduced = true
+				eta *= .1
+			}
 			points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
 			fmt.Println(head, i, total)
-			set.Zero()
 			others.Zero()
 			total = 0
 		}
@@ -278,7 +304,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 	if err != nil {
 		panic(err)
 	}
-	width, size := 36, 49
+	width, size := 49, 16+1
 	type Head struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V
@@ -287,7 +313,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 	heads := make([]Head, h)
 	for i := range heads {
 		rnd := rand.New(rand.NewSource(int64(i + 1)))
-		selections := make([]Position, size)
+		selections := make([]Position, size-1)
 		for i := range selections {
 			selections[i].Positions = make([]int, width)
 		}
@@ -314,10 +340,11 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 		relu := tf32.U(ReLu)
 		mask := tf32.U(Mask)
 		norm := tf32.U(Normalize)
-		average := tf32.U(AverageRows)
+		//average := tf32.U(AverageRows)
 		//encode := tf32.U(PositionEncodingLayer)
+		concat := tf32.B(Concat)
 
-		input := tf32.Add(tf32.Mul(set.Get("encode"), others.Get("input")), set.Get("biasEncode"))
+		input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 		norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
 		query := tf32.Mul(set.Get("query"), norm_input)
 		key := tf32.Mul(set.Get("key"), norm_input)
@@ -332,7 +359,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 		l3 := tf32.Add(attention(query1, key1, value1, others.Get("dk")), l2)
 		norm_l3 := tf32.Add(tf32.Hadamard(norm(l3), set.Get("n2_2")), set.Get("bn2_2"))
 		l4 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), norm_l3), set.Get("b2_1")))), set.Get("b2_2")), l3)
-		output := mask(average(tf32.Add(tf32.Mul(set.Get("project"), l4), set.Get("bias"))))
+		output := tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"), mask(l4)), set.Get("bias")))), set.Get("bias1"))
 		heads[i] = Head{
 			Head:       output,
 			Inputs:     inputs,
@@ -354,9 +381,12 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 		for j := range head.Inputs.X {
 			head.Inputs.X[j] = 0
 		}
+		for j := 0; j < width; j++ {
+			head.Inputs.X[j] = 1
+		}
 		for j, set := range head.Selections {
 			for i, value := range set.Positions {
-				head.Inputs.X[j*width+i] = float32(image[value])
+				head.Inputs.X[(j+1)*width+i] = float32(image[value]) / 255
 			}
 		}
 		//SelectedPositionEncoding(selections, inputs)

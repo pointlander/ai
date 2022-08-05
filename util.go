@@ -115,6 +115,37 @@ func ComplexQuadratic(k tc128.Continuation, a, b *tc128.V) bool {
 	return false
 }
 
+// Concat concats two tensors
+func Concat(k tf32.Continuation, a, b *tf32.V) bool {
+	if len(a.S) != 2 || len(b.S) != 2 {
+		panic("tensor needs to have two dimensions")
+	}
+	if a.S[1] != b.S[1] {
+		panic("dimensions are not the same")
+	}
+	c := tf32.NewV(a.S[0]+b.S[0], a.S[1])
+	for i := 0; i < a.S[1]; i++ {
+		for j := 0; j < a.S[0]; j++ {
+			c.X = append(c.X, a.X[i*a.S[0]+j])
+		}
+		for j := 0; j < b.S[0]; j++ {
+			c.X = append(c.X, b.X[i*b.S[0]+j])
+		}
+	}
+	if k(&c) {
+		return true
+	}
+	for i := 0; i < a.S[1]; i++ {
+		for j := 0; j < a.S[0]; j++ {
+			a.D[i*a.S[0]+j] += c.D[i*c.S[0]+j]
+		}
+		for j := 0; j < b.S[0]; j++ {
+			b.D[i*b.S[0]+j] += c.D[i*c.S[0]+j+a.S[0]]
+		}
+	}
+	return false
+}
+
 // ComplexSigmoid computes the sigmoid of a complex tensor
 func ComplexSigmoid(k tc128.Continuation, a *tc128.V) bool {
 	c := tc128.NewV(a.S...)
@@ -187,13 +218,13 @@ type Position struct {
 
 // SelectPositions selects the positions of input data
 func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
-	w, h := width/7, height/7
+	w, h := width/4, height/4
 	s := 0
 	for k := 0; k < height; k += h {
 		for j := 0; j < width; j += w {
 			set, index := positions[s], 0
-			for y := -1; y < h+1; y++ {
-				for x := -1; x < w+1; x++ {
+			for y := 0; y < h; y++ {
+				for x := 0; x < w; x++ {
 					x := (j + x + width) % width
 					y := (k + y + height) % height
 					set.Positions[index] = x + y*width
@@ -293,14 +324,14 @@ func PositionEncodingLayer(k tf32.Continuation, a *tf32.V) bool {
 
 // Mask masks the input data
 func Mask(k tf32.Continuation, a *tf32.V) bool {
-	c := tf32.NewV(10, 1)
-	for i := 0; i < 10; i++ {
+	c := tf32.NewV(136, 1)
+	for i := 0; i < 136; i++ {
 		c.X = append(c.X, a.X[i])
 	}
 	if k(&c) {
 		return true
 	}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 136; i++ {
 		a.D[i] += c.D[i]
 	}
 	return false
