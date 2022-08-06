@@ -298,6 +298,251 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention func(query, ke
 	set.Save(fmt.Sprintf("%d_set.w", head), 0, 0)
 }
 
+// ProbabilisticTransformerParallel is a probabilistic transformer
+func ProbabilisticTransformerParallel(head int, hiddenSize int, attention func(query, key, value, dk tf32.Meta) tf32.Meta) {
+	rnd := rand.New(rand.NewSource(int64(head + 1)))
+	images, err := mnist.Load()
+	if err != nil {
+		panic(err)
+	}
+	width, size := 49, 16+1
+	selections := make([]Position, size-1)
+	for i := range selections {
+		selections[i].Positions = make([]int, width)
+	}
+	SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
+
+	others := tf32.NewSet()
+	others.Add("input", width, size)
+	others.Add("output", 10, 1)
+	others.Add("dk", size, 1)
+	others.Add("alpha", 1, 1)
+
+	for _, w := range others.Weights {
+		w.X = w.X[:cap(w.X)]
+	}
+	inputs, outputs, dk := others.ByName["input"], others.ByName["output"], others.ByName["dk"]
+	for i := range dk.X {
+		dk.X[i] = 1 / float32(hiddenSize)
+	}
+	others.ByName["alpha"].X[0] = 0.01
+
+	set := tf32.NewSet()
+	set.Add("encode", width, hiddenSize)
+	set.Add("position", 8, size)
+	hiddenSize += 8
+	set.Add("biasEncode", hiddenSize, size)
+
+	for i := 1; i < 5; i++ {
+		set.Add(fmt.Sprintf("n%d_1", i), hiddenSize, 1)
+		set.Add(fmt.Sprintf("bn%d_1", i), hiddenSize, 1)
+		set.Add(fmt.Sprintf("query%d", i), hiddenSize, hiddenSize)
+		set.Add(fmt.Sprintf("key%d", i), hiddenSize, hiddenSize)
+		set.Add(fmt.Sprintf("value%d", i), hiddenSize, hiddenSize)
+		set.Add(fmt.Sprintf("n%d_2", i), hiddenSize, 1)
+		set.Add(fmt.Sprintf("bn%d_2", i), hiddenSize, 1)
+		set.Add(fmt.Sprintf("W%d_1", i), hiddenSize, hiddenSize)
+		set.Add(fmt.Sprintf("b%d_1", i), hiddenSize, 1)
+		set.Add(fmt.Sprintf("W%d_2", i), hiddenSize, hiddenSize)
+		set.Add(fmt.Sprintf("b%d_2", i), hiddenSize, 1)
+	}
+
+	set.Add("project", 4*hiddenSize, hiddenSize)
+	set.Add("bias", hiddenSize, 1)
+	set.Add("project1", hiddenSize, hiddenSize)
+	set.Add("bias1", hiddenSize, 1)
+	set.Add("project2", hiddenSize, 10)
+	set.Add("bias2", 10, 1)
+
+	for _, w := range set.Weights {
+		if strings.HasPrefix(w.N, "b") {
+			w.X = w.X[:cap(w.X)]
+			continue
+		}
+		factor := math.Sqrt(2.0 / float64(hiddenSize))
+		for i := 0; i < cap(w.X); i++ {
+			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
+		}
+	}
+
+	deltas := make([][]float32, 0, 8)
+	for _, p := range set.Weights {
+		deltas = append(deltas, make([]float32, len(p.X)))
+	}
+
+	//quadratic := tf32.B(Quadratic)
+	relu := tf32.U(ReLu)
+	mask := tf32.U(Mask)
+	norm := tf32.U(Normalize)
+	//average := tf32.U(AverageRows)
+	//encode := tf32.U(PositionEncodingLayer)
+	concat := tf32.B(Concat)
+
+	input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
+
+	var heads [4]tf32.Meta
+
+	for i := range heads {
+		l := i + 1
+		norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get(fmt.Sprintf("n%d_1", l))), set.Get(fmt.Sprintf("bn%d_1", l)))
+		query := tf32.Mul(set.Get(fmt.Sprintf("query%d", l)), norm_input)
+		key := tf32.Mul(set.Get(fmt.Sprintf("key%d", l)), norm_input)
+		value := tf32.Mul(set.Get(fmt.Sprintf("value%d", l)), norm_input)
+		l1 := tf32.Add(attention(query, key, value, others.Get("dk")), input)
+		norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get(fmt.Sprintf("n%d_2", l))), set.Get(fmt.Sprintf("bn%d_2", l)))
+		heads[i] = tf32.Add(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
+			relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), norm_l1), set.Get(fmt.Sprintf("b%d_1", l))))),
+			set.Get(fmt.Sprintf("b%d_2", l))), l1)
+	}
+
+	output := tf32.Add(tf32.Mul(set.Get("project2"),
+		relu(tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"),
+			concat(concat(concat(mask(heads[0]), mask(heads[1])), mask(heads[2])), mask(heads[3]))), set.Get("bias")))), set.Get("bias1")))), set.Get("bias2"))
+
+	/*regularization := tf32.Add(tf32.Sum(tf32.Abs(set.Get("query"))), tf32.Sum(tf32.Abs(set.Get("key"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W1_1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b1_1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W1_2"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b1_2"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("query1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("key1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("value1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W2_1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b2_1"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("W2_2"))))
+	regularization = tf32.Add(regularization, tf32.Sum(tf32.Abs(set.Get("b2_2"))))
+	regularization = tf32.Hadamard(regularization, others.Get("alpha"))
+	cost := tf32.Add(tf32.Sum(tf32.Quadratic(l4, others.Get("output"))), regularization)*/
+	cost := tf32.Quadratic(output, others.Get("output"))
+
+	c, halt := make(chan os.Signal), false
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		halt = true
+	}()
+
+	alpha, eta, iterations := float32(.001), float32(.001), len(images.Train.Images)
+	points := make(plotter.XYs, 0, iterations)
+	i := 0
+	total := float32(0.0)
+	reduced := false
+	for i < len(images.Train.Images) {
+		index := rnd.Intn(len(images.Train.Images))
+		image := images.Train.Images[index]
+
+		for j := range inputs.X {
+			inputs.X[j] = 0
+		}
+		for j := range outputs.X {
+			outputs.X[j] = 0
+		}
+
+		//SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
+		for j := 0; j < width; j++ {
+			inputs.X[j] = 1
+		}
+		for j, set := range selections {
+			for i, value := range set.Positions {
+				inputs.X[(j+1)*width+i] =
+					float32(image[value]) / 255
+			}
+		}
+		outputs.X[int(images.Train.Labels[index])] = 1
+		//SelectedPositionEncoding(selections, inputs)
+		//PositionEncoding(inputs)
+		/*statistics := make([]Statistics, width)
+		for j := 0; j < len(inputs.X); j += width {
+			for k := 0; k < width; k++ {
+				statistics[k].Add(float64(inputs.X[j+k]))
+			}
+		}
+		for j := 0; j < len(inputs.X); j += width {
+			for k := 0; k < width; k++ {
+				inputs.X[j+k] = float32((float64(inputs.X[j+k]) - statistics[k].Average()) / statistics[k].StandardDeviation())
+			}
+		}*/
+
+		total += tf32.Gradient(cost).X[0]
+		for j, w := range set.Weights {
+			for k, d := range w.D {
+				deltas[j][k] += d
+			}
+		}
+		set.Zero()
+
+		if i > 0 && i%100 == 0 {
+			sum := float32(0.0)
+			/*for _, p := range set.Weights {
+				for _, d := range p.D {
+					sum += d * d
+				}
+			}*/
+			for _, p := range deltas {
+				for _, d := range p {
+					d /= 100
+					sum += d * d
+				}
+			}
+			norm := math.Sqrt(float64(sum))
+			scaling := float32(1.0)
+			if norm > 1 {
+				scaling = 1 / float32(norm)
+			}
+
+			for j, w := range set.Weights {
+				for k := range w.D {
+					//deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
+					//set.Weights[j].X[k] += deltas[j][k]
+					_ = alpha
+					set.Weights[j].X[k] -= eta * deltas[j][k] / 100 * scaling
+					deltas[j][k] = 0
+				}
+			}
+			total /= 100
+			if !reduced && total < .5 {
+				reduced = true
+				eta *= .1
+			}
+			points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
+			fmt.Println(head, i, total)
+			others.Zero()
+			total = 0
+		}
+
+		if halt || math.IsNaN(float64(total)) {
+			fmt.Println(total)
+			break
+		}
+		if i%1000 == 0 {
+			set.Save(fmt.Sprintf("%d_%d_set.w", head, i), total, i)
+		}
+		i++
+	}
+
+	p := plot.New()
+
+	p.Title.Text = "epochs vs cost"
+	p.X.Label.Text = "epochs"
+	p.Y.Label.Text = "cost"
+
+	scatter, err := plotter.NewScatter(points)
+	if err != nil {
+		panic(err)
+	}
+	scatter.GlyphStyle.Radius = vg.Length(1)
+	scatter.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(scatter)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, fmt.Sprintf("%d_probabilistic_transformer_cost.png", head))
+	if err != nil {
+		panic(err)
+	}
+
+	set.Save(fmt.Sprintf("%d_set.w", head), 0, 0)
+}
+
 // InferenceProbabilisticTransformer is a probabilistic transformer inference
 func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int, attention func(query, key, value, dk tf32.Meta) tf32.Meta) {
 	images, err := mnist.Load()
@@ -360,6 +605,162 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 		norm_l3 := tf32.Add(tf32.Hadamard(norm(l3), set.Get("n2_2")), set.Get("bn2_2"))
 		l4 := tf32.Add(tf32.Add(tf32.Mul(set.Get("W2_2"), relu(tf32.Add(tf32.Mul(set.Get("W2_1"), norm_l3), set.Get("b2_1")))), set.Get("b2_2")), l3)
 		output := tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"), mask(l4)), set.Get("bias")))), set.Get("bias1"))
+		heads[i] = Head{
+			Head:       output,
+			Inputs:     inputs,
+			Selections: selections,
+		}
+	}
+
+	type Result struct {
+		Probability float32
+		Index       int
+	}
+
+	process := func(head Head, test int) []Result {
+		histogram := make([]Result, 10)
+		image := images.Test.Images[test]
+
+		//for i := 0; i < 32; i++ {
+		//SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
+		for j := range head.Inputs.X {
+			head.Inputs.X[j] = 0
+		}
+		for j := 0; j < width; j++ {
+			head.Inputs.X[j] = 1
+		}
+		for j, set := range head.Selections {
+			for i, value := range set.Positions {
+				head.Inputs.X[(j+1)*width+i] = float32(image[value]) / 255
+			}
+		}
+		//SelectedPositionEncoding(selections, inputs)
+		//PositionEncoding(inputs)
+		/*statistics := make([]Statistics, width)
+		for j := 0; j < len(inputs.X); j += width {
+			for k := 0; k < width; k++ {
+				statistics[k].Add(float64(inputs.X[j+k]))
+			}
+		}
+		for j := 0; j < len(inputs.X); j += width {
+			for k := 0; k < width; k++ {
+				inputs.X[j+k] = float32((float64(inputs.X[j+k]) - statistics[k].Average()) / statistics[k].StandardDeviation())
+			}
+		}*/
+
+		head.Head(func(a *tf32.V) bool {
+			for j := 0; j < 10; j++ {
+				histogram[j].Probability += a.X[j]
+				histogram[j].Index = j
+			}
+			return true
+		})
+		//}
+		return histogram
+	}
+
+	if test == -1 {
+		correct := 0
+		for i := range images.Test.Images {
+			var votes [10]int
+			for _, head := range heads {
+				histogram := process(head, i)
+				sort.Slice(histogram, func(i, j int) bool {
+					return histogram[i].Probability > histogram[j].Probability
+				})
+				votes[histogram[0].Index]++
+			}
+			max, x := 0, 0
+			for key, value := range votes {
+				if value > max {
+					max = value
+					x = key
+				}
+			}
+			if x == int(images.Test.Labels[i]) {
+				correct++
+			}
+		}
+		fmt.Println(correct, len(images.Test.Images))
+	} else {
+		for _, head := range heads {
+			fmt.Println(images.Test.Labels[test])
+			histogram := process(head, test)
+			sort.Slice(histogram, func(i, j int) bool {
+				return histogram[i].Probability > histogram[j].Probability
+			})
+			fmt.Println(histogram)
+		}
+	}
+}
+
+// InferenceProbabilisticTransformerParallel is a probabilistic transformer inference
+func InferenceProbabilisticTransformerParallel(h, test int, name string, hiddenSize int, attention func(query, key, value, dk tf32.Meta) tf32.Meta) {
+	images, err := mnist.Load()
+	if err != nil {
+		panic(err)
+	}
+	width, size := 49, 16+1
+	type Head struct {
+		Head       tf32.Meta
+		Inputs     *tf32.V
+		Selections []Position
+	}
+	heads := make([]Head, h)
+	for i := range heads {
+		rnd := rand.New(rand.NewSource(int64(i + 1)))
+		selections := make([]Position, size-1)
+		for i := range selections {
+			selections[i].Positions = make([]int, width)
+		}
+		SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
+		others := tf32.NewSet()
+		others.Add("input", width, size)
+		others.Add("dk", size, 1)
+
+		for _, w := range others.Weights {
+			w.X = w.X[:cap(w.X)]
+		}
+		inputs, dk := others.ByName["input"], others.ByName["dk"]
+		for i := range dk.X {
+			dk.X[i] = 1 / float32(size)
+		}
+
+		set := tf32.NewSet()
+		_, _, err = set.Open(fmt.Sprintf("%d_%s", i, name))
+		if err != nil {
+			panic(err)
+		}
+
+		//quadratic := tf32.B(Quadratic)
+		relu := tf32.U(ReLu)
+		mask := tf32.U(Mask)
+		norm := tf32.U(Normalize)
+		//average := tf32.U(AverageRows)
+		//encode := tf32.U(PositionEncodingLayer)
+		concat := tf32.B(Concat)
+
+		input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
+
+		var aheads [4]tf32.Meta
+
+		for i := range aheads {
+			l := i + 1
+			norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get(fmt.Sprintf("n%d_1", l))), set.Get(fmt.Sprintf("bn%d_1", l)))
+			query := tf32.Mul(set.Get(fmt.Sprintf("query%d", l)), norm_input)
+			key := tf32.Mul(set.Get(fmt.Sprintf("key%d", l)), norm_input)
+			value := tf32.Mul(set.Get(fmt.Sprintf("value%d", l)), norm_input)
+			l1 := tf32.Add(attention(query, key, value, others.Get("dk")), input)
+			norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get(fmt.Sprintf("n%d_2", l))), set.Get(fmt.Sprintf("bn%d_2", l)))
+			aheads[i] = tf32.Add(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
+				relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), norm_l1), set.Get(fmt.Sprintf("b%d_1", l))))),
+				set.Get(fmt.Sprintf("b%d_2", l))), l1)
+		}
+
+		output := tf32.Add(tf32.Mul(set.Get("project2"),
+			relu(tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"),
+				concat(concat(concat(mask(aheads[0]), mask(aheads[1])), mask(aheads[2])), mask(aheads[3]))), set.Get("bias")))), set.Get("bias1")))), set.Get("bias2"))
+
 		heads[i] = Head{
 			Head:       output,
 			Inputs:     inputs,
