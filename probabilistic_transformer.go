@@ -375,6 +375,11 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		if strings.HasPrefix(w.N, "b") {
 			w.X = w.X[:cap(w.X)]
 			continue
+		} else if strings.HasPrefix(w.N, "n") {
+			for i := 0; i < cap(w.X); i++ {
+				w.X = append(w.X, 1)
+			}
+			continue
 		}
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
 		for i := 0; i < cap(w.X); i++ {
