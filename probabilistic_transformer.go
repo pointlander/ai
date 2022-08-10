@@ -346,8 +346,8 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 	set := tf32.NewSet()
 	set.Add("encode", width, t.HiddenSize)
-	set.Add("position", 128, size)
-	t.HiddenSize += 128
+	set.Add("position", t.HiddenSize, size)
+	t.HiddenSize *= 2
 	set.Add("biasEncode", t.HiddenSize, size)
 
 	for i := 1; i < 5; i++ {

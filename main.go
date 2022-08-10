@@ -62,7 +62,7 @@ func main() {
 		for i := 0; i < *FlagHeads; i++ {
 			t := Configuration{
 				Head:       i,
-				HiddenSize: 128,
+				HiddenSize: 32,
 				Attention:  RegularAttention,
 				Swap:       true,
 			}
@@ -70,7 +70,7 @@ func main() {
 		}
 	} else if *FlagName != "" {
 		t := Configuration{
-			HiddenSize: 128,
+			HiddenSize: 32,
 			Attention:  RegularAttention,
 			Swap:       true,
 		}

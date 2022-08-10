@@ -324,14 +324,15 @@ func PositionEncodingLayer(k tf32.Continuation, a *tf32.V) bool {
 
 // Mask masks the input data
 func Mask(k tf32.Continuation, a *tf32.V) bool {
-	c := tf32.NewV(128+128, 1)
-	for i := 0; i < 128+128; i++ {
+	width := a.S[0]
+	c := tf32.NewV(width, 1)
+	for i := 0; i < width; i++ {
 		c.X = append(c.X, a.X[i])
 	}
 	if k(&c) {
 		return true
 	}
-	for i := 0; i < 128+128; i++ {
+	for i := 0; i < width; i++ {
 		a.D[i] += c.D[i]
 	}
 	return false
