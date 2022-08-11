@@ -413,7 +413,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		if t.Swap {
 			value = tf32.Mul(norm_input, set.Get(fmt.Sprintf("value%d", l)))
 		}
-		l1 := tf32.Add(t.Attention(query, key, value, others.Get("dk")), input)
+		l1 := t.Attention(query, key, value, others.Get("dk"))
 		norm_l1 := tf32.Add(tf32.Hadamard(tf32.T(norm(tf32.T(l1))), set.Get(fmt.Sprintf("n%d_2", l))), set.Get(fmt.Sprintf("bn%d_2", l)))
 		heads[i] = tf32.Add(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
 			relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), norm_l1), set.Get(fmt.Sprintf("b%d_1", l))))),
@@ -451,9 +451,9 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 			outputs.X[j] = 0
 		}
 
-		for j := 0; j < width; j++ {
+		/*for j := 0; j < width; j++ {
 			inputs.X[j] = 1
-		}
+		}*/
 		for j, set := range selections {
 			for i, value := range set.Positions {
 				inputs.X[(j+1)*width+i] =
@@ -501,7 +501,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 			total /= BatchSize
 			if !reduced && total < .5 {
 				reduced = true
-				eta *= .1
+				//eta *= .1
 			}
 			points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
 			fmt.Println(t.Head, i, total)
@@ -751,7 +751,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 			if t.Swap {
 				value = tf32.Mul(norm_input, set.Get(fmt.Sprintf("value%d", l)))
 			}
-			l1 := tf32.Add(t.Attention(query, key, value, others.Get("dk")), input)
+			l1 := t.Attention(query, key, value, others.Get("dk"))
 			norm_l1 := tf32.Add(tf32.Hadamard(tf32.T(norm(tf32.T(l1))), set.Get(fmt.Sprintf("n%d_2", l))), set.Get(fmt.Sprintf("bn%d_2", l)))
 			aheads[i] = tf32.Add(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
 				relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), norm_l1), set.Get(fmt.Sprintf("b%d_1", l))))),
@@ -782,9 +782,9 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		for j := range head.Inputs.X {
 			head.Inputs.X[j] = 0
 		}
-		for j := 0; j < width; j++ {
+		/*for j := 0; j < width; j++ {
 			head.Inputs.X[j] = 1
-		}
+		}*/
 		for j, set := range head.Selections {
 			for i, value := range set.Positions {
 				head.Inputs.X[(j+1)*width+i] = float32(image[value]) / 255
