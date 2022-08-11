@@ -317,6 +317,7 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention Attention) {
 
 // ProbabilisticTransformerParallel is a probabilistic transformer
 func (t Configuration) ProbabilisticTransformerParallel() {
+	// 6783 10000 Removed short circuit
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
