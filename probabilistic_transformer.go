@@ -401,6 +401,35 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	//encode := tf32.U(PositionEncodingLayer)
 	concat := tf32.B(Concat)
 
+	dropout := tf32.U(func(k tf32.Continuation, a *tf32.V) bool {
+		size, width := len(a.X), a.S[0]
+		c, drops, factor := tf32.NewV(a.S...), make([]int, width), float32(1)/(1-.1)
+		for i := range drops {
+			if rnd.Float64() > .1 {
+				drops[i] = 1
+			}
+		}
+		c.X = c.X[:cap(c.X)]
+		for i := 0; i < size; i += width {
+			for j, ax := range a.X[i : i+width] {
+				if drops[j] == 1 {
+					c.X[i+j] = ax * factor
+				}
+			}
+		}
+		if k(&c) {
+			return true
+		}
+		for i := 0; i < size; i += width {
+			for j := range a.D[i : i+width] {
+				if drops[j] == 1 {
+					a.D[i+j] += c.D[i+j]
+				}
+			}
+		}
+		return false
+	})
+
 	input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 
 	var heads [4]tf32.Meta
@@ -414,11 +443,11 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		if t.Swap {
 			value = tf32.Mul(norm_input, set.Get(fmt.Sprintf("value%d", l)))
 		}
-		l1 := t.Attention(query, key, value, others.Get("dk"))
+		l1 := tf32.Add(dropout(t.Attention(query, key, value, others.Get("dk"))), input)
 		norm_l1 := tf32.Add(tf32.Hadamard(tf32.T(norm(tf32.T(l1))), set.Get(fmt.Sprintf("n%d_2", l))), set.Get(fmt.Sprintf("bn%d_2", l)))
-		heads[i] = tf32.Add(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
+		heads[i] = tf32.Add(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
 			relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), norm_l1), set.Get(fmt.Sprintf("b%d_1", l))))),
-			set.Get(fmt.Sprintf("b%d_2", l))), l1)
+			set.Get(fmt.Sprintf("b%d_2", l)))), l1)
 	}
 
 	//output := tf32.Add(tf32.Mul(set.Get("project2"),
@@ -441,7 +470,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	i := 0
 	total := float32(0.0)
 	reduced := false
-	for i < 5*len(images.Train.Images) {
+	for i < 10*len(images.Train.Images) {
 		index := rnd.Intn(len(images.Train.Images))
 		image := images.Train.Images[index]
 
