@@ -388,9 +388,9 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		}
 	}
 
-	deltas := make([][]float32, 0, 8)
+	gradients := make([][]float32, 0, 8)
 	for _, p := range set.Weights {
-		deltas = append(deltas, make([]float32, len(p.X)))
+		gradients = append(gradients, make([]float32, len(p.X)))
 	}
 
 	//quadratic := tf32.B(Quadratic)
@@ -495,7 +495,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		total += tf32.Gradient(cost).X[0]
 		for j, w := range set.Weights {
 			for k, d := range w.D {
-				deltas[j][k] += d
+				gradients[j][k] += d
 			}
 		}
 		set.Zero()
@@ -507,7 +507,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 					sum += d * d
 				}
 			}*/
-			for _, p := range deltas {
+			for _, p := range gradients {
 				for _, d := range p {
 					d /= BatchSize
 					sum += d * d
@@ -524,8 +524,8 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 					//deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
 					//set.Weights[j].X[k] += deltas[j][k]
 					_ = alpha
-					set.Weights[j].X[k] -= eta * deltas[j][k] / BatchSize * scaling
-					deltas[j][k] = 0
+					set.Weights[j].X[k] -= eta * gradients[j][k] / BatchSize * scaling
+					gradients[j][k] = 0
 				}
 			}
 			total /= BatchSize
