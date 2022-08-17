@@ -25,6 +25,10 @@ import (
 const (
 	// BatchSize is the size of a batch
 	BatchSize = 100
+	// B1 exponential decay of the rate for the first moment estimates
+	B1 = 0.9
+	// B2 exponential decay rate for the second-moment estimates
+	B2 = 0.999
 )
 
 type (
@@ -36,6 +40,11 @@ type (
 		HiddenSize int
 		Attention  Attention
 		Swap       bool
+	}
+	// Adam is an adam state
+	Adam struct {
+		M float32
+		V float32
 	}
 )
 
@@ -393,6 +402,11 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		gradients = append(gradients, make([]float32, len(p.X)))
 	}
 
+	adam := make([][]Adam, 0, 8)
+	for _, p := range set.Weights {
+		adam = append(adam, make([]Adam, len(p.X)))
+	}
+
 	//quadratic := tf32.B(Quadratic)
 	relu := tf32.U(ReLu)
 	mask := tf32.U(Mask)
@@ -465,7 +479,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.01), float32(.01), len(images.Train.Images)
+	alpha, eta, iterations := float32(.001), float32(.001), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	total := float32(0.0)
@@ -524,8 +538,17 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 					//deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
 					//set.Weights[j].X[k] += deltas[j][k]
 					_ = alpha
-					set.Weights[j].X[k] -= eta * gradients[j][k] / BatchSize * scaling
+					//set.Weights[j].X[k] -= eta * gradients[j][k] / BatchSize * scaling
+					_ = scaling
+					g := gradients[j][k] / BatchSize
+					m := B1*adam[j][k].M + (1-B1)*g
+					v := B2*adam[j][k].V + (1-B2)*g*g
+					adam[j][k].M = m
+					adam[j][k].V = v
 					gradients[j][k] = 0
+					mhat := m / (1 - float32(math.Pow(float64(B1), float64(i))))
+					vhat := v / (1 - float32(math.Pow(float64(B2), float64(i))))
+					set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 				}
 			}
 			total /= BatchSize
