@@ -5,6 +5,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"math/cmplx"
 	"math/rand"
@@ -171,6 +172,9 @@ func Softmax(k tf32.Continuation, a *tf32.V) bool {
 	c, size, sum := tf32.NewV(a.S...), len(a.X), float32(0.0)
 	for i := 0; i < size; i++ {
 		e := exp(a.X[i])
+		if math.IsNaN(float64(e)) || math.IsInf(float64(e), 0) {
+			panic(fmt.Errorf("%f is not a valid exponent", a.X[i]))
+		}
 		sum += e
 		c.X = append(c.X, e)
 	}
@@ -388,13 +392,14 @@ func Normalize(k tf32.Continuation, a *tf32.V) bool {
 	}
 	for i := 0; i < width; i++ {
 		deviation[i] = float32(math.Sqrt(float64(deviation[i] / n)))
-		if deviation[i] == 0 {
-			deviation[i] = 0.001
-		}
 	}
 	for i := 0; i < size; i += width {
 		for j, ax := range a.X[i : i+width] {
-			c.X = append(c.X, (ax-mean[j])/deviation[j])
+			if deviation[j] == 0 {
+				c.X = append(c.X, ax-mean[j])
+			} else {
+				c.X = append(c.X, (ax-mean[j])/deviation[j])
+			}
 		}
 	}
 	if k(&c) {
