@@ -6,6 +6,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"math"
 )
 
 var (
@@ -59,6 +61,14 @@ func main() {
 
 	//Transformer(32)
 	if *FlagTransformer {
+		for i := 0; i < 256; i++ {
+			y := float32(i)
+			x := float32(math.Exp(float64(y)))
+			if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
+				fmt.Println(x, i)
+				break
+			}
+		}
 		for i := 0; i < *FlagHeads; i++ {
 			t := Configuration{
 				Head:       i,

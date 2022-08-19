@@ -491,6 +491,8 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		}
 		return float32(y)
 	}
+	pinf := float32(2/(1-B2) - 1)
+	fmt.Println(pinf)
 	reduced := false
 	for i < 10*len(images.Train.Images) {
 		index := rnd.Intn(len(images.Train.Images))
@@ -558,8 +560,25 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 					adam[j][k].V = v
 					gradients[j][k] = 0
 					mhat := m / (1 - b1)
-					vhat := v / (1 - b2)
-					set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+					pt := pinf - 2*float32(u)*b2/(1-b2)
+					if pt > 4 {
+						if v == 0 {
+							v = 1e-8
+						}
+						lt := float32(math.Sqrt(float64((1 - b2) / v)))
+						rt := float32(math.Sqrt(float64(((pt - 4) * (pt - 2) * pinf) / ((pinf - 4) * (pinf - 2) * pt))))
+						if math.IsNaN(float64(lt)) || math.IsInf(float64(lt), 0) {
+							panic(fmt.Errorf("lt is nan %f %f", lt, v))
+						}
+						if math.IsNaN(float64(rt)) || math.IsInf(float64(rt), 0) {
+							panic(fmt.Errorf("rt is nan %f", rt))
+						}
+						set.Weights[j].X[k] -= eta * rt * mhat * lt
+					} else {
+						set.Weights[j].X[k] -= eta * mhat
+					}
+					//vhat := v / (1 - b2)
+					//set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 				}
 			}
 			total /= BatchSize
