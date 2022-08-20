@@ -560,7 +560,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 					adam[j][k].V = v
 					gradients[j][k] = 0
 					mhat := m / (1 - b1)
-					pt := pinf - 2*float32(u)*b2/(1-b2)
+					/*pt := pinf - 2*float32(u)*b2/(1-b2)
 					if pt > 4 {
 						if v == 0 {
 							v = 1e-8
@@ -576,9 +576,9 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 						set.Weights[j].X[k] -= eta * rt * mhat * lt
 					} else {
 						set.Weights[j].X[k] -= eta * mhat
-					}
-					//vhat := v / (1 - b2)
-					//set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+					}*/
+					vhat := v / (1 - b2)
+					set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
 				}
 			}
 			total /= BatchSize

@@ -164,9 +164,9 @@ func ComplexSigmoid(k tc128.Continuation, a *tc128.V) bool {
 }
 
 func exp(a float32) float32 {
-	if a > 88 {
+	/*if a > 88 {
 		a = 88
-	}
+	}*/
 	return float32(math.Exp(float64(a)))
 }
 

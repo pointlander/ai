@@ -69,6 +69,13 @@ func main() {
 				break
 			}
 		}
+		for i := 0; i < 1024; i++ {
+			x := math.Exp(float64(i))
+			if math.IsNaN(x) || math.IsInf(x, 0) {
+				fmt.Println(x, i)
+				break
+			}
+		}
 		for i := 0; i < *FlagHeads; i++ {
 			t := Configuration{
 				Head:       i,
