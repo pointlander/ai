@@ -172,24 +172,26 @@ func exp(a float32) float32 {
 
 // Softmax is the softmax function
 func Softmax(k tf32.Continuation, a *tf32.V) bool {
-	c, size, sum := tf32.NewV(a.S...), len(a.X), float32(0.0)
+	c, size, sum := tf32.NewV(a.S...), len(a.X), 0.0
+	values := make([]float64, size)
 	for i := 0; i < size; i++ {
-		e := exp(a.X[i])
-		if math.IsNaN(float64(e)) || math.IsInf(float64(e), 0) {
+		e := math.Exp(float64(a.X[i]))
+		if math.IsNaN(e) || math.IsInf(e, 0) {
 			panic(fmt.Errorf("%f is not a valid exponent", a.X[i]))
 		}
 		sum += e
-		c.X = append(c.X, e)
+		values[i] = e
 	}
-	for i, cx := range c.X {
-		c.X[i] = cx / sum
+	for i, v := range values {
+		values[i] /= sum
+		c.X = append(c.X, float32(v/sum))
 	}
 	if k(&c) {
 		return true
 	}
 	for i, d := range c.D {
-		cx := c.X[i]
-		a.D[i] += d * (cx - cx*cx)
+		cx := values[i]
+		a.D[i] += d * float32(cx-cx*cx)
 	}
 	return false
 }
