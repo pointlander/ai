@@ -8,6 +8,9 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"math/big"
+
+	"github.com/ALTree/bigfloat"
 )
 
 var (
@@ -76,6 +79,15 @@ func main() {
 				break
 			}
 		}
+		for i := 0; i < 1024; i++ {
+			r := bigfloat.Exp(big.NewFloat(float64(i)))
+			if r.IsInf() {
+				fmt.Println(r, i)
+				break
+			}
+		}
+		r := bigfloat.Exp(big.NewFloat(float64(1024 * 1024)))
+		fmt.Println(r.String())
 		for i := 0; i < *FlagHeads; i++ {
 			t := Configuration{
 				Head:       i,
