@@ -7,9 +7,11 @@ package main
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"math/cmplx"
 	"math/rand"
 
+	"github.com/ALTree/bigfloat"
 	"github.com/pointlander/gradient/tc128"
 	"github.com/pointlander/gradient/tf32"
 )
@@ -192,6 +194,39 @@ func Softmax(k tf32.Continuation, a *tf32.V) bool {
 	for i, d := range c.D {
 		cx := values[i]
 		a.D[i] += d * float32(cx-cx*cx)
+	}
+	return false
+}
+
+// SoftmaxBig is the softmax function implemented with big float
+func SoftmaxBig(k tf32.Continuation, a *tf32.V) bool {
+	c, size, sum := tf32.NewV(a.S...), len(a.X), big.NewFloat(0.0)
+	values := make([]big.Float, size)
+	for i := 0; i < size; i++ {
+		v := big.NewFloat(float64(a.X[i]))
+		e := bigfloat.Exp(v)
+		if e.IsInf() {
+			panic(fmt.Errorf("%f is not a valid exponent", a.X[i]))
+		}
+		sum.Add(sum, e)
+		values[i] = *e
+	}
+	for i := range values {
+		values[i].Quo(&values[i], sum)
+		value, _ := values[i].Float32()
+		c.X = append(c.X, value)
+	}
+	if k(&c) {
+		return true
+	}
+	for i, d := range c.D {
+		cx := values[i]
+		acc := cx.Copy(&cx)
+		acc.Mul(acc, &cx)
+		acc.Neg(acc)
+		acc.Add(acc, &cx)
+		value, _ := acc.Float32()
+		a.D[i] += d * value
 	}
 	return false
 }

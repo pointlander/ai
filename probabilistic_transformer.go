@@ -51,7 +51,7 @@ type (
 // RegularAttention implements the attention mechanism described in
 // https://arxiv.org/abs/1706.03762?amp=1
 func RegularAttention(query, key, value, dk tf32.Meta) tf32.Meta {
-	softmax := tf32.U(Softmax)
+	softmax := tf32.U(SoftmaxBig)
 	return tf32.T(tf32.Mul(softmax(tf32.Hadamard(tf32.Mul(query, key), dk)), value))
 }
 
