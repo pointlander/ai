@@ -201,15 +201,24 @@ func Softmax(k tf32.Continuation, a *tf32.V) bool {
 // SoftmaxBig is the softmax function implemented with big float
 func SoftmaxBig(k tf32.Continuation, a *tf32.V) bool {
 	c, size, sum := tf32.NewV(a.S...), len(a.X), big.NewFloat(0.0)
-	values := make([]big.Float, size)
-	for i := 0; i < size; i++ {
+	values, done := make([]big.Float, size), make(chan bool, 8)
+	process := func(i int) {
 		v := big.NewFloat(float64(a.X[i]))
 		e := bigfloat.Exp(v)
 		if e.IsInf() {
 			panic(fmt.Errorf("%f is not a valid exponent", a.X[i]))
 		}
-		sum.Add(sum, e)
 		values[i] = *e
+		done <- true
+	}
+	for i := 0; i < size; i++ {
+		go process(i)
+	}
+	for i := 0; i < size; i++ {
+		<-done
+	}
+	for _, v := range values {
+		sum.Add(sum, &v)
 	}
 	for i := range values {
 		values[i].Quo(&values[i], sum)
@@ -220,13 +229,8 @@ func SoftmaxBig(k tf32.Continuation, a *tf32.V) bool {
 		return true
 	}
 	for i, d := range c.D {
-		cx := values[i]
-		acc := cx.Copy(&cx)
-		acc.Mul(acc, &cx)
-		acc.Neg(acc)
-		acc.Add(acc, &cx)
-		value, _ := acc.Float32()
-		a.D[i] += d * value
+		cx := c.X[i]
+		a.D[i] += d * (cx - cx*cx)
 	}
 	return false
 }
