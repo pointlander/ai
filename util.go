@@ -204,6 +204,7 @@ func SoftmaxBig(k tf32.Continuation, a *tf32.V) bool {
 	values, done := make([]big.Float, size), make(chan bool, 8)
 	process := func(i int) {
 		v := big.NewFloat(float64(a.X[i]))
+		v.SetPrec(128)
 		e := bigfloat.Exp(v)
 		if e.IsInf() {
 			panic(fmt.Errorf("%f is not a valid exponent", a.X[i]))
@@ -217,6 +218,7 @@ func SoftmaxBig(k tf32.Continuation, a *tf32.V) bool {
 	for i := 0; i < size; i++ {
 		<-done
 	}
+	sum.SetPrec(128)
 	for _, v := range values {
 		sum.Add(sum, &v)
 	}
