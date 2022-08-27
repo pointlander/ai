@@ -34,8 +34,11 @@ const (
 type (
 	// Attention is an attention function
 	Attention func(query, key, value, dk tf32.Meta) tf32.Meta
+	// HeadType is the type of head
+	HeadType int
 	// Configuration is the configuation for the model
 	Configuration struct {
+		HeadType
 		Head       int
 		HiddenSize int
 		Attention  Attention
@@ -46,6 +49,13 @@ type (
 		M float32
 		V float32
 	}
+)
+
+const (
+	// HeadTypeRegular is the regular head type
+	HeadTypeRegular HeadType = iota
+	// HeadTypeReZero is the ReZero head type
+	HeadTypeReZero
 )
 
 // RegularAttention implements the attention mechanism described in
@@ -66,6 +76,40 @@ func SimpleAttention(query, key, value, dk tf32.Meta) tf32.Meta {
 // IdentityAttention implements an identity attention
 func IdentityAttention(query, key, value, dk tf32.Meta) tf32.Meta {
 	return value
+}
+
+// RegularHead implements the regular head
+func (t Configuration) RegularHead(dropout func(a tf32.Meta) tf32.Meta, l int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
+	relu := tf32.U(ReLu)
+	norm := tf32.U(Normalize)
+	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get(fmt.Sprintf("n%d_1", l))), set.Get(fmt.Sprintf("bn%d_1", l)))
+	query := tf32.Mul(set.Get(fmt.Sprintf("query%d", l)), norm_input)
+	key := tf32.Mul(set.Get(fmt.Sprintf("key%d", l)), norm_input)
+	value := tf32.Mul(set.Get(fmt.Sprintf("value%d", l)), norm_input)
+	if t.Swap {
+		value = tf32.Mul(norm_input, set.Get(fmt.Sprintf("value%d", l)))
+	}
+	l1 := tf32.Add(dropout(t.Attention(query, key, value, others.Get("dk"))), input)
+	norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get(fmt.Sprintf("n%d_2", l))), set.Get(fmt.Sprintf("bn%d_2", l)))
+	return tf32.Add(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
+		relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), norm_l1), set.Get(fmt.Sprintf("b%d_1", l))))),
+		set.Get(fmt.Sprintf("b%d_2", l)))), l1)
+}
+
+// ReZeroHead implements the ReZero head
+func (t Configuration) ReZeroHead(dropout func(a tf32.Meta) tf32.Meta, l int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
+	relu := tf32.U(ReLu)
+	hadamard := tf32.B(Hadamard)
+	query := tf32.Mul(set.Get(fmt.Sprintf("query%d", l)), input)
+	key := tf32.Mul(set.Get(fmt.Sprintf("key%d", l)), input)
+	value := tf32.Mul(set.Get(fmt.Sprintf("value%d", l)), input)
+	if t.Swap {
+		value = tf32.Mul(input, set.Get(fmt.Sprintf("value%d", l)))
+	}
+	l1 := tf32.Add(hadamard(dropout(t.Attention(query, key, value, others.Get("dk"))), set.Get(fmt.Sprintf("a%d_1", l))), input)
+	return tf32.Add(hadamard(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
+		relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), l1), set.Get(fmt.Sprintf("b%d_1", l))))),
+		set.Get(fmt.Sprintf("b%d_2", l)))), set.Get(fmt.Sprintf("a%d_2", l))), l1)
 }
 
 // ProbabilisticTransformer is a probabilistic transformer
@@ -365,13 +409,17 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	for i := 1; i < 5; i++ {
 		set.Add(fmt.Sprintf("a%d_1", i), 1, 1)
 		set.Add(fmt.Sprintf("a%d_2", i), 1, 1)
-		//set.Add(fmt.Sprintf("n%d_1", i), t.HiddenSize, 1)
-		//set.Add(fmt.Sprintf("bn%d_1", i), t.HiddenSize, 1)
+		if t.HeadType == HeadTypeRegular {
+			set.Add(fmt.Sprintf("n%d_1", i), t.HiddenSize, 1)
+			set.Add(fmt.Sprintf("bn%d_1", i), t.HiddenSize, 1)
+		}
 		set.Add(fmt.Sprintf("query%d", i), t.HiddenSize, t.HiddenSize)
 		set.Add(fmt.Sprintf("key%d", i), t.HiddenSize, t.HiddenSize)
 		set.Add(fmt.Sprintf("value%d", i), t.HiddenSize, t.HiddenSize)
-		//set.Add(fmt.Sprintf("n%d_2", i), t.HiddenSize, 1)
-		//set.Add(fmt.Sprintf("bn%d_2", i), t.HiddenSize, 1)
+		if t.HeadType == HeadTypeRegular {
+			set.Add(fmt.Sprintf("n%d_2", i), t.HiddenSize, 1)
+			set.Add(fmt.Sprintf("bn%d_2", i), t.HiddenSize, 1)
+		}
 		set.Add(fmt.Sprintf("W%d_1", i), t.HiddenSize, t.HiddenSize)
 		set.Add(fmt.Sprintf("b%d_1", i), t.HiddenSize, 1)
 		set.Add(fmt.Sprintf("W%d_2", i), t.HiddenSize, t.HiddenSize)
@@ -412,13 +460,13 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	}
 
 	//quadratic := tf32.B(Quadratic)
-	relu := tf32.U(ReLu)
+	//relu := tf32.U(ReLu)
 	//mask := tf32.U(Mask)
 	//norm := tf32.U(Normalize)
 	average := tf32.U(AverageRows)
 	//encode := tf32.U(PositionEncodingLayer)
 	concat := tf32.B(Concat)
-	hadamard := tf32.B(Hadamard)
+	//hadamard := tf32.B(Hadamard)
 
 	regularization := concat(tf32.Avg(tf32.Abs(set.Get("encode"))), tf32.Avg(tf32.Abs(set.Get("position"))))
 	regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get("biasEncode"))))
@@ -464,28 +512,13 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 	for i := range heads {
 		l := i + 1
-		/*norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get(fmt.Sprintf("n%d_1", l))), set.Get(fmt.Sprintf("bn%d_1", l)))
-		query := tf32.Mul(set.Get(fmt.Sprintf("query%d", l)), norm_input)
-		key := tf32.Mul(set.Get(fmt.Sprintf("key%d", l)), norm_input)
-		value := tf32.Mul(set.Get(fmt.Sprintf("value%d", l)), norm_input)
-		if t.Swap {
-			value = tf32.Mul(norm_input, set.Get(fmt.Sprintf("value%d", l)))
+		if t.HeadType == HeadTypeRegular {
+			heads[i] = t.RegularHead(dropout, l, input, set, others)
+		} else if t.HeadType == HeadTypeReZero {
+			heads[i] = t.ReZeroHead(dropout, l, input, set, others)
+		} else {
+			panic(fmt.Errorf("%d invalid head type", t.HeadType))
 		}
-		l1 := tf32.Add(dropout(t.Attention(query, key, value, others.Get("dk"))), input)
-		norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get(fmt.Sprintf("n%d_2", l))), set.Get(fmt.Sprintf("bn%d_2", l)))
-		heads[i] = tf32.Add(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
-			relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), norm_l1), set.Get(fmt.Sprintf("b%d_1", l))))),
-			set.Get(fmt.Sprintf("b%d_2", l)))), l1)*/
-		query := tf32.Mul(set.Get(fmt.Sprintf("query%d", l)), input)
-		key := tf32.Mul(set.Get(fmt.Sprintf("key%d", l)), input)
-		value := tf32.Mul(set.Get(fmt.Sprintf("value%d", l)), input)
-		if t.Swap {
-			value = tf32.Mul(input, set.Get(fmt.Sprintf("value%d", l)))
-		}
-		l1 := tf32.Add(hadamard(dropout(t.Attention(query, key, value, others.Get("dk"))), set.Get(fmt.Sprintf("a%d_1", l))), input)
-		heads[i] = tf32.Add(hadamard(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
-			relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), l1), set.Get(fmt.Sprintf("b%d_1", l))))),
-			set.Get(fmt.Sprintf("b%d_2", l)))), set.Get(fmt.Sprintf("a%d_2", l))), l1)
 	}
 
 	//output := tf32.Add(tf32.Mul(set.Get("project2"),
@@ -850,13 +883,20 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		}
 
 		//quadratic := tf32.B(Quadratic)
-		relu := tf32.U(ReLu)
+		//relu := tf32.U(ReLu)
 		//mask := tf32.U(Mask)
 		//norm := tf32.U(Normalize)
 		average := tf32.U(AverageRows)
 		//encode := tf32.U(PositionEncodingLayer)
 		concat := tf32.B(Concat)
-		hadamard := tf32.B(Hadamard)
+		//hadamard := tf32.B(Hadamard)
+
+		dropout := tf32.U(func(k tf32.Continuation, a *tf32.V) bool {
+			if k(a) {
+				return true
+			}
+			return false
+		})
 
 		input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 
@@ -864,28 +904,13 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 
 		for i := range aheads {
 			l := i + 1
-			/*norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get(fmt.Sprintf("n%d_1", l))), set.Get(fmt.Sprintf("bn%d_1", l)))
-			query := tf32.Mul(set.Get(fmt.Sprintf("query%d", l)), norm_input)
-			key := tf32.Mul(set.Get(fmt.Sprintf("key%d", l)), norm_input)
-			value := tf32.Mul(set.Get(fmt.Sprintf("value%d", l)), norm_input)
-			if t.Swap {
-				value = tf32.Mul(norm_input, set.Get(fmt.Sprintf("value%d", l)))
+			if t.HeadType == HeadTypeRegular {
+				aheads[i] = t.RegularHead(dropout, l, input, set, others)
+			} else if t.HeadType == HeadTypeReZero {
+				aheads[i] = t.ReZeroHead(dropout, l, input, set, others)
+			} else {
+				panic(fmt.Errorf("%d invalid head type", t.HeadType))
 			}
-			l1 := t.Attention(query, key, value, others.Get("dk"))
-			norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get(fmt.Sprintf("n%d_2", l))), set.Get(fmt.Sprintf("bn%d_2", l)))
-			aheads[i] = tf32.Add(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
-				relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), norm_l1), set.Get(fmt.Sprintf("b%d_1", l))))),
-				set.Get(fmt.Sprintf("b%d_2", l))), l1)*/
-			query := tf32.Mul(set.Get(fmt.Sprintf("query%d", l)), input)
-			key := tf32.Mul(set.Get(fmt.Sprintf("key%d", l)), input)
-			value := tf32.Mul(set.Get(fmt.Sprintf("value%d", l)), input)
-			if t.Swap {
-				value = tf32.Mul(input, set.Get(fmt.Sprintf("value%d", l)))
-			}
-			l1 := tf32.Add(hadamard(t.Attention(query, key, value, others.Get("dk")), set.Get(fmt.Sprintf("a%d_1", l))), input)
-			aheads[i] = tf32.Add(hadamard(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", l)),
-				relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", l)), l1), set.Get(fmt.Sprintf("b%d_1", l))))),
-				set.Get(fmt.Sprintf("b%d_2", l))), set.Get(fmt.Sprintf("a%d_2", l))), l1)
 		}
 
 		//output := tf32.Add(tf32.Mul(set.Get("project2"),

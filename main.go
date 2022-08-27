@@ -90,6 +90,7 @@ func main() {
 		fmt.Println(r.String())
 		for i := 0; i < *FlagHeads; i++ {
 			t := Configuration{
+				HeadType:   HeadTypeReZero,
 				Head:       i,
 				HiddenSize: 32,
 				Attention:  RegularAttention,
@@ -99,6 +100,7 @@ func main() {
 		}
 	} else if *FlagName != "" {
 		t := Configuration{
+			HeadType:   HeadTypeReZero,
 			HiddenSize: 32,
 			Attention:  RegularAttention,
 			Swap:       true,
