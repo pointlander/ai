@@ -198,6 +198,52 @@ func Softmax(k tf32.Continuation, a *tf32.V) bool {
 	return false
 }
 
+// Clamp is a clamp activation function
+func Clamp(k tf32.Continuation, a *tf32.V) bool {
+	c, size := tf32.NewV(a.S...), len(a.X)
+	for i := 0; i < size; i++ {
+		if ax := a.X[i]; ax > 709 {
+			c.X = append(c.X, 709)
+		} else {
+			c.X = append(c.X, ax)
+		}
+	}
+	if k(&c) {
+		return true
+	}
+	for i, d := range c.D {
+		if ax := a.X[i]; ax > 709 {
+			a.D[i] += 0
+		} else {
+			a.D[i] += d
+		}
+	}
+	return false
+}
+
+// Hadamard computes the hadamard product of two tensors
+func Hadamard(k tf32.Continuation, a, b *tf32.V) bool {
+	if len(a.S) != 2 || len(b.S) != 2 {
+		panic("tensor needs to have two dimensions")
+	}
+	length := len(b.X)
+	if a.S[1] != b.S[1] && b.S[1] != 1 {
+		panic("dimensions are not the same")
+	}
+	c := tf32.NewV(a.S...)
+	for i, j := range a.X {
+		c.X = append(c.X, j*b.X[i%length])
+	}
+	if k(&c) {
+		return true
+	}
+	for i, j := range c.D {
+		a.D[i] += j * b.X[i%length]
+		b.D[i%length] += j * a.X[i]
+	}
+	return false
+}
+
 // SoftmaxBig is the softmax function implemented with big float
 func SoftmaxBig(k tf32.Continuation, a *tf32.V) bool {
 	c, size, sum := tf32.NewV(a.S...), len(a.X), big.NewFloat(0.0)
