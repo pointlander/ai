@@ -375,6 +375,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	// 6783 10000 Removed short circuit
 	// 7624 10000 Simple
 	// 3796 10000 Regular
+	// 958 10000 Identity
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
