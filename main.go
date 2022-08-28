@@ -93,8 +93,8 @@ func main() {
 				HeadType:   HeadTypeReZero,
 				Head:       i,
 				HiddenSize: 32,
-				Attention:  RegularAttention,
-				Swap:       true,
+				Attention:  SimpleAttention,
+				Swap:       false,
 			}
 			t.ProbabilisticTransformerParallel()
 		}
@@ -102,8 +102,8 @@ func main() {
 		t := Configuration{
 			HeadType:   HeadTypeReZero,
 			HiddenSize: 32,
-			Attention:  RegularAttention,
-			Swap:       true,
+			Attention:  SimpleAttention,
+			Swap:       false,
 		}
 		t.InferenceProbabilisticTransformerParallel(*FlagHeads, *FlagTest, *FlagName)
 	}

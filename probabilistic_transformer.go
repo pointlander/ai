@@ -373,6 +373,8 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention Attention) {
 // ProbabilisticTransformerParallel is a probabilistic transformer
 func (t Configuration) ProbabilisticTransformerParallel() {
 	// 6783 10000 Removed short circuit
+	// 7624 10000 Simple
+	// 3796 10000 Regular
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
@@ -428,9 +430,9 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 	set.Add("project", 4*t.HiddenSize, 10)
 	set.Add("bias", 10, 1)
-	//set.Add("project1", hiddenSize, hiddenSize)
-	//set.Add("bias1", hiddenSize, 1)
-	//set.Add("project2", hiddenSize, 10)
+	//set.Add("project1", t.HiddenSize, t.HiddenSize)
+	//set.Add("bias1", t.HiddenSize, 1)
+	//set.Add("project2", t.HiddenSize, 10)
 	//set.Add("bias2", 10, 1)
 
 	for _, w := range set.Weights {
@@ -537,7 +539,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		halt = true
 	}()
 
-	alpha, eta, iterations := float32(.0001), float32(.0001), len(images.Train.Images)
+	alpha, eta, iterations := float32(.001), float32(.001), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
 	i := 0
 	total := float32(0.0)
@@ -586,9 +588,10 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		if norm > 1 {
 			scaling = 1 / float32(norm)
 		}
+		_ = scaling
 		for j, w := range set.Weights {
 			for k, d := range w.D {
-				gradients[j][k] += d * scaling
+				gradients[j][k] += d //* scaling
 			}
 		}
 		set.Zero()
@@ -873,7 +876,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		}
 		inputs, dk := others.ByName["input"], others.ByName["dk"]
 		for i := range dk.X {
-			dk.X[i] = 1 / float32(size)
+			dk.X[i] = 1 / float32(math.Sqrt(float64(size)))
 		}
 
 		set := tf32.NewSet()
