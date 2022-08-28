@@ -70,7 +70,7 @@ func RegularAttention(query, key, value, dk tf32.Meta) tf32.Meta {
 // SimpleAttention implements the attention mechanism described in
 // https://openreview.net/forum?id=pW--cu2FCHY
 func SimpleAttention(query, key, value, dk tf32.Meta) tf32.Meta {
-	return tf32.Hadamard(tf32.Sigmoid(query), tf32.SumRows(tf32.Hadamard(tf32.T(tf32.Softmax(tf32.T(key))), value)))
+	return tf32.Hadamard(tf32.Sigmoid(query), tf32.SumRows(tf32.Hadamard(tf32.Softmax(key), value)))
 }
 
 // IdentityAttention implements an identity attention
@@ -376,6 +376,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	// 7624 10000 Simple
 	// 3796 10000 Regular
 	// 958 10000 Identity
+	// 7144 10000 Simple row based softmax
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
