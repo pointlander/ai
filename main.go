@@ -92,7 +92,7 @@ func main() {
 			t := Configuration{
 				HeadType:   HeadTypeReZero,
 				Head:       i,
-				HiddenSize: 32,
+				HiddenSize: 64,
 				Attention:  SimpleAttention,
 				Swap:       false,
 			}
@@ -101,7 +101,7 @@ func main() {
 	} else if *FlagName != "" {
 		t := Configuration{
 			HeadType:   HeadTypeReZero,
-			HiddenSize: 32,
+			HiddenSize: 64,
 			Attention:  SimpleAttention,
 			Swap:       false,
 		}
