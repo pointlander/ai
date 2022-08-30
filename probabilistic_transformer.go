@@ -29,6 +29,8 @@ const (
 	B1 = 0.9
 	// B2 exponential decay rate for the second-moment estimates
 	B2 = 0.999
+	// Heads is the number of heads
+	Heads = 8
 )
 
 type (
@@ -378,6 +380,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	// 958 10000 Identity
 	// 7144 10000 Simple row based softmax
 	// 8872 10000 Simple with 64 float wide
+	// 8919 10000 Simple with 8 heads
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
@@ -411,7 +414,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	t.HiddenSize *= 2
 	set.Add("biasEncode", t.HiddenSize, size)
 
-	for i := 1; i < 5; i++ {
+	for i := 1; i < Heads+1; i++ {
 		set.Add(fmt.Sprintf("a%d_1", i), 1, 1)
 		set.Add(fmt.Sprintf("a%d_2", i), 1, 1)
 		if t.HeadType == HeadTypeRegular {
@@ -431,7 +434,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		set.Add(fmt.Sprintf("b%d_2", i), t.HiddenSize, 1)
 	}
 
-	set.Add("project", 4*t.HiddenSize, 10)
+	set.Add("project", Heads*t.HiddenSize, 10)
 	set.Add("bias", 10, 1)
 	//set.Add("project1", t.HiddenSize, t.HiddenSize)
 	//set.Add("bias1", t.HiddenSize, 1)
@@ -475,7 +478,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 	regularization := concat(tf32.Avg(tf32.Abs(set.Get("encode"))), tf32.Avg(tf32.Abs(set.Get("position"))))
 	regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get("biasEncode"))))
-	for i := 1; i < 5; i++ {
+	for i := 1; i < Heads+1; i++ {
 		regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("query%d", i)))))
 		regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("key%d", i)))))
 		regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("value%d", i)))))
@@ -513,7 +516,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 	input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 
-	var heads [4]tf32.Meta
+	var heads [Heads]tf32.Meta
 
 	for i := range heads {
 		l := i + 1
@@ -530,8 +533,12 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	//	relu(tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"),
 	//		concat(concat(concat(mask(heads[0]), mask(heads[1])), mask(heads[2])), mask(heads[3]))), set.Get("bias")))), set.Get("bias1")))), set.Get("bias2"))
 
-	output := tf32.Add(tf32.Mul(set.Get("project"),
-		concat(concat(concat(average(heads[0]), average(heads[1])), average(heads[2])), average(heads[3]))), set.Get("bias"))
+	cat := concat(average(heads[0]), average(heads[1]))
+	for i := 2; i < Heads; i++ {
+		cat = concat(cat, average(heads[i]))
+	}
+
+	output := tf32.Add(tf32.Mul(set.Get("project"), cat), set.Get("bias"))
 	cost := tf32.Add(tf32.Sum(tf32.Quadratic(output, others.Get("output"))), regularization)
 	//cost := tf32.Quadratic(output, others.Get("output"))
 
@@ -906,7 +913,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 
 		input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 
-		var aheads [4]tf32.Meta
+		var aheads [Heads]tf32.Meta
 
 		for i := range aheads {
 			l := i + 1
@@ -922,8 +929,14 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		//output := tf32.Add(tf32.Mul(set.Get("project2"),
 		//	relu(tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"),
 		//		concat(concat(concat(mask(aheads[0]), mask(aheads[1])), mask(aheads[2])), mask(aheads[3]))), set.Get("bias")))), set.Get("bias1")))), set.Get("bias2"))
-		output := tf32.Add(tf32.Mul(set.Get("project"),
-			concat(concat(concat(average(aheads[0]), average(aheads[1])), average(aheads[2])), average(aheads[3]))), set.Get("bias"))
+
+		cat := concat(average(aheads[0]), average(aheads[1]))
+		for i := 2; i < Heads; i++ {
+			cat = concat(cat, average(aheads[i]))
+		}
+
+		output := tf32.Add(tf32.Mul(set.Get("project"), cat), set.Get("bias"))
+
 		heads[i] = Head{
 			Head:       output,
 			Inputs:     inputs,
