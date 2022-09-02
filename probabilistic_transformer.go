@@ -83,37 +83,37 @@ func IdentityAttention(query, key, value, dk tf32.Meta) tf32.Meta {
 }
 
 // RegularHead implements the regular head
-func (t Configuration) RegularHead(dropout func(a tf32.Meta) tf32.Meta, h int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
+func (t Configuration) RegularHead(dropout func(a tf32.Meta) tf32.Meta, l, h int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
 	relu := tf32.U(ReLu)
 	norm := tf32.U(Normalize)
-	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get(fmt.Sprintf("n%d_1", h))), set.Get(fmt.Sprintf("bn%d_1", h)))
-	query := tf32.Mul(set.Get(fmt.Sprintf("query%d", h)), norm_input)
-	key := tf32.Mul(set.Get(fmt.Sprintf("key%d", h)), norm_input)
-	value := tf32.Mul(set.Get(fmt.Sprintf("value%d", h)), norm_input)
+	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get(fmt.Sprintf("n%d_%d_1", l, h))), set.Get(fmt.Sprintf("bn%d_%d_1", l, h)))
+	query := tf32.Mul(set.Get(fmt.Sprintf("query%d_%d", l, h)), norm_input)
+	key := tf32.Mul(set.Get(fmt.Sprintf("key%d_%d", l, h)), norm_input)
+	value := tf32.Mul(set.Get(fmt.Sprintf("value%d_%d", l, h)), norm_input)
 	if t.Swap {
-		value = tf32.Mul(norm_input, set.Get(fmt.Sprintf("value%d", h)))
+		value = tf32.Mul(norm_input, set.Get(fmt.Sprintf("value%d_%d", l, h)))
 	}
 	l1 := tf32.Add(dropout(t.Attention(query, key, value, others.Get("dk"))), input)
-	norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get(fmt.Sprintf("n%d_2", h))), set.Get(fmt.Sprintf("bn%d_2", h)))
-	return tf32.Add(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", h)),
-		relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", h)), norm_l1), set.Get(fmt.Sprintf("b%d_1", h))))),
-		set.Get(fmt.Sprintf("b%d_2", h)))), l1)
+	norm_l1 := tf32.Add(tf32.Hadamard(norm(l1), set.Get(fmt.Sprintf("n%d_%d_2", l, h))), set.Get(fmt.Sprintf("bn%d_%d_2", l, h)))
+	return tf32.Add(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_%d_2", l, h)),
+		relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_%d_1", l, h)), norm_l1), set.Get(fmt.Sprintf("b%d_%d_1", l, h))))),
+		set.Get(fmt.Sprintf("b%d_%d_2", l, h)))), l1)
 }
 
 // ReZeroHead implements the ReZero head
-func (t Configuration) ReZeroHead(dropout func(a tf32.Meta) tf32.Meta, h int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
+func (t Configuration) ReZeroHead(dropout func(a tf32.Meta) tf32.Meta, l, h int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
 	relu := tf32.U(ReLu)
 	hadamard := tf32.B(Hadamard)
-	query := tf32.Mul(set.Get(fmt.Sprintf("query%d", h)), input)
-	key := tf32.Mul(set.Get(fmt.Sprintf("key%d", h)), input)
-	value := tf32.Mul(set.Get(fmt.Sprintf("value%d", h)), input)
+	query := tf32.Mul(set.Get(fmt.Sprintf("query%d_%d", l, h)), input)
+	key := tf32.Mul(set.Get(fmt.Sprintf("key%d_%d", l, h)), input)
+	value := tf32.Mul(set.Get(fmt.Sprintf("value%d_%d", l, h)), input)
 	if t.Swap {
-		value = tf32.Mul(input, set.Get(fmt.Sprintf("value%d", h)))
+		value = tf32.Mul(input, set.Get(fmt.Sprintf("value%d_%d", l, h)))
 	}
-	l1 := tf32.Add(hadamard(dropout(t.Attention(query, key, value, others.Get("dk"))), set.Get(fmt.Sprintf("a%d_1", h))), input)
-	return tf32.Add(hadamard(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_2", h)),
-		relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_1", h)), l1), set.Get(fmt.Sprintf("b%d_1", h))))),
-		set.Get(fmt.Sprintf("b%d_2", h)))), set.Get(fmt.Sprintf("a%d_2", h))), l1)
+	l1 := tf32.Add(hadamard(dropout(t.Attention(query, key, value, others.Get("dk"))), set.Get(fmt.Sprintf("a%d_%d_1", l, h))), input)
+	return tf32.Add(hadamard(dropout(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_%d_2", l, h)),
+		relu(tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("W%d_%d_1", l, h)), l1), set.Get(fmt.Sprintf("b%d_%d_1", l, h))))),
+		set.Get(fmt.Sprintf("b%d_%d_2", l, h)))), set.Get(fmt.Sprintf("a%d_%d_2", l, h))), l1)
 }
 
 // ProbabilisticTransformer is a probabilistic transformer
@@ -416,32 +416,38 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	t.HiddenSize *= 2
 	set.Add("biasEncode", t.HiddenSize, size)
 
-	for h := 0; h < Heads; h++ {
-		set.Add(fmt.Sprintf("a%d_1", h), 1, 1)
-		set.Add(fmt.Sprintf("a%d_2", h), 1, 1)
-		if t.HeadType == HeadTypeRegular {
-			set.Add(fmt.Sprintf("n%d_1", h), t.HiddenSize, 1)
-			set.Add(fmt.Sprintf("bn%d_1", h), t.HiddenSize, 1)
+	for l := 0; l < Layers; l++ {
+		for h := 0; h < Heads; h++ {
+			set.Add(fmt.Sprintf("a%d_%d_1", l, h), 1, 1)
+			set.Add(fmt.Sprintf("a%d_%d_2", l, h), 1, 1)
+			if t.HeadType == HeadTypeRegular {
+				set.Add(fmt.Sprintf("n%d_%d_1", l, h), t.HiddenSize, 1)
+				set.Add(fmt.Sprintf("bn%d_%d_1", l, h), t.HiddenSize, 1)
+			}
+			set.Add(fmt.Sprintf("query%d_%d", l, h), t.HiddenSize, t.HiddenSize)
+			set.Add(fmt.Sprintf("key%d_%d", l, h), t.HiddenSize, t.HiddenSize)
+			set.Add(fmt.Sprintf("value%d_%d", l, h), t.HiddenSize, t.HiddenSize)
+			if t.HeadType == HeadTypeRegular {
+				set.Add(fmt.Sprintf("n%d_%d_2", l, h), t.HiddenSize, 1)
+				set.Add(fmt.Sprintf("bn%d_%d_2", l, h), t.HiddenSize, 1)
+			}
+			set.Add(fmt.Sprintf("W%d_%d_1", l, h), t.HiddenSize, t.HiddenSize)
+			set.Add(fmt.Sprintf("b%d_%d_1", l, h), t.HiddenSize, 1)
+			set.Add(fmt.Sprintf("W%d_%d_2", l, h), t.HiddenSize, t.HiddenSize)
+			set.Add(fmt.Sprintf("b%d_%d_2", l, h), t.HiddenSize, 1)
 		}
-		set.Add(fmt.Sprintf("query%d", h), t.HiddenSize, t.HiddenSize)
-		set.Add(fmt.Sprintf("key%d", h), t.HiddenSize, t.HiddenSize)
-		set.Add(fmt.Sprintf("value%d", h), t.HiddenSize, t.HiddenSize)
-		if t.HeadType == HeadTypeRegular {
-			set.Add(fmt.Sprintf("n%d_2", h), t.HiddenSize, 1)
-			set.Add(fmt.Sprintf("bn%d_2", h), t.HiddenSize, 1)
+		if l < Layers-1 {
+			set.Add(fmt.Sprintf("project%d", l), Heads*t.HiddenSize, t.HiddenSize)
+			set.Add(fmt.Sprintf("bias%d", l), t.HiddenSize, 1)
+		} else {
+			set.Add(fmt.Sprintf("project%d", l), Heads*t.HiddenSize, 10)
+			set.Add(fmt.Sprintf("bias%d", l), 10, 1)
 		}
-		set.Add(fmt.Sprintf("W%d_1", h), t.HiddenSize, t.HiddenSize)
-		set.Add(fmt.Sprintf("b%d_1", h), t.HiddenSize, 1)
-		set.Add(fmt.Sprintf("W%d_2", h), t.HiddenSize, t.HiddenSize)
-		set.Add(fmt.Sprintf("b%d_2", h), t.HiddenSize, 1)
+		//set.Add("project1", t.HiddenSize, t.HiddenSize)
+		//set.Add("bias1", t.HiddenSize, 1)
+		//set.Add("project2", t.HiddenSize, 10)
+		//set.Add("bias2", 10, 1)
 	}
-
-	set.Add("project", Heads*t.HiddenSize, 10)
-	set.Add("bias", 10, 1)
-	//set.Add("project1", t.HiddenSize, t.HiddenSize)
-	//set.Add("bias1", t.HiddenSize, 1)
-	//set.Add("project2", t.HiddenSize, 10)
-	//set.Add("bias2", 10, 1)
 
 	for _, w := range set.Weights {
 		if strings.HasPrefix(w.N, "a") || strings.HasPrefix(w.N, "b") {
@@ -480,10 +486,22 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 	regularization := concat(tf32.Avg(tf32.Abs(set.Get("encode"))), tf32.Avg(tf32.Abs(set.Get("position"))))
 	regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get("biasEncode"))))
-	for h := 0; h < Heads; h++ {
-		regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("query%d", h)))))
-		regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("key%d", h)))))
-		regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("value%d", h)))))
+	for l := 0; l < Layers; l++ {
+		for h := 0; h < Heads; h++ {
+			regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("query%d_%d", l, h)))))
+			regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("key%d_%d", l, h)))))
+			regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("value%d_%d", l, h)))))
+			if l < Layers-1 {
+				regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("W%d_%d_1", l, h)))))
+				regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("b%d_%d_1", l, h)))))
+				regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("W%d_%d_2", l, h)))))
+				regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("b%d_%d_2", l, h)))))
+			}
+		}
+		if l < Layers-1 {
+			regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("project%d", l)))))
+			regularization = concat(regularization, tf32.Avg(tf32.Abs(set.Get(fmt.Sprintf("bias%d", l)))))
+		}
 	}
 	regularization = tf32.Avg(regularization)
 
@@ -516,32 +534,32 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		return false
 	})
 
-	input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
-
-	var heads [Heads]tf32.Meta
-
-	for h := range heads {
-		if t.HeadType == HeadTypeRegular {
-			heads[h] = t.RegularHead(dropout, h, input, set, others)
-		} else if t.HeadType == HeadTypeReZero {
-			heads[h] = t.ReZeroHead(dropout, h, input, set, others)
-		} else {
-			panic(fmt.Errorf("%d invalid head type", t.HeadType))
+	next := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
+	var heads [Layers][Heads]tf32.Meta
+	for l := range heads {
+		for h := range heads[l] {
+			if t.HeadType == HeadTypeRegular {
+				heads[l][h] = t.RegularHead(dropout, l, h, next, set, others)
+			} else if t.HeadType == HeadTypeReZero {
+				heads[l][h] = t.ReZeroHead(dropout, l, h, next, set, others)
+			} else {
+				panic(fmt.Errorf("%d invalid head type", t.HeadType))
+			}
 		}
+		cat := concat(average(heads[l][0]), average(heads[l][1]))
+		for i := 2; i < Heads; i++ {
+			cat = concat(cat, average(heads[l][i]))
+		}
+		if l < Layers-1 {
+			cat = concat(heads[l][0], heads[l][1])
+			for i := 2; i < Heads; i++ {
+				cat = concat(cat, heads[l][i])
+			}
+		}
+		next = tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("project%d", l)), cat), set.Get(fmt.Sprintf("bias%d", l)))
 	}
 
-	//output := tf32.Add(tf32.Mul(set.Get("project2"),
-	//	relu(tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"),
-	//		concat(concat(concat(mask(heads[0]), mask(heads[1])), mask(heads[2])), mask(heads[3]))), set.Get("bias")))), set.Get("bias1")))), set.Get("bias2"))
-
-	cat := concat(average(heads[0]), average(heads[1]))
-	for i := 2; i < Heads; i++ {
-		cat = concat(cat, average(heads[i]))
-	}
-
-	output := tf32.Add(tf32.Mul(set.Get("project"), cat), set.Get("bias"))
-	cost := tf32.Add(tf32.Sum(tf32.Quadratic(output, others.Get("output"))), regularization)
-	//cost := tf32.Quadratic(output, others.Get("output"))
+	cost := tf32.Add(tf32.Sum(tf32.Quadratic(next, others.Get("output"))), regularization)
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -865,13 +883,13 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		panic(err)
 	}
 	width, size := 16, 49+1
-	type Head struct {
+	type Voter struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V
 		Selections []Position
 	}
-	heads := make([]Head, h)
-	for i := range heads {
+	voters := make([]Voter, h)
+	for i := range voters {
 		rnd := rand.New(rand.NewSource(int64(i + 1)))
 		selections := make([]Position, size-1)
 		for i := range selections {
@@ -909,33 +927,33 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 			return k(a)
 		})
 
-		input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
-
-		var aheads [Heads]tf32.Meta
-
-		for h := range aheads {
-			if t.HeadType == HeadTypeRegular {
-				aheads[h] = t.RegularHead(dropout, h, input, set, others)
-			} else if t.HeadType == HeadTypeReZero {
-				aheads[h] = t.ReZeroHead(dropout, h, input, set, others)
-			} else {
-				panic(fmt.Errorf("%d invalid head type", t.HeadType))
+		next := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
+		var heads [Layers][Heads]tf32.Meta
+		for l := range heads {
+			for h := range heads[l] {
+				if t.HeadType == HeadTypeRegular {
+					heads[l][h] = t.RegularHead(dropout, l, h, next, set, others)
+				} else if t.HeadType == HeadTypeReZero {
+					heads[l][h] = t.ReZeroHead(dropout, l, h, next, set, others)
+				} else {
+					panic(fmt.Errorf("%d invalid head type", t.HeadType))
+				}
 			}
+			cat := concat(average(heads[l][0]), average(heads[l][1]))
+			for i := 2; i < Heads; i++ {
+				cat = concat(cat, average(heads[l][i]))
+			}
+			if l < Layers-1 {
+				cat = concat(heads[l][0], heads[l][1])
+				for i := 2; i < Heads; i++ {
+					cat = concat(cat, heads[l][i])
+				}
+			}
+			next = tf32.Add(tf32.Mul(set.Get(fmt.Sprintf("project%d", l)), cat), set.Get(fmt.Sprintf("bias%d", l)))
 		}
 
-		//output := tf32.Add(tf32.Mul(set.Get("project2"),
-		//	relu(tf32.Add(tf32.Mul(set.Get("project1"), relu(tf32.Add(tf32.Mul(set.Get("project"),
-		//		concat(concat(concat(mask(aheads[0]), mask(aheads[1])), mask(aheads[2])), mask(aheads[3]))), set.Get("bias")))), set.Get("bias1")))), set.Get("bias2"))
-
-		cat := concat(average(aheads[0]), average(aheads[1]))
-		for i := 2; i < Heads; i++ {
-			cat = concat(cat, average(aheads[i]))
-		}
-
-		output := tf32.Add(tf32.Mul(set.Get("project"), cat), set.Get("bias"))
-
-		heads[i] = Head{
-			Head:       output,
+		voters[i] = Voter{
+			Head:       next,
 			Inputs:     inputs,
 			Selections: selections,
 		}
@@ -946,23 +964,23 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		Index       int
 	}
 
-	process := func(head Head, test int) []Result {
+	process := func(voter Voter, test int) []Result {
 		histogram := make([]Result, 10)
 		image := images.Test.Images[test]
 
-		for j := range head.Inputs.X {
-			head.Inputs.X[j] = 0
+		for j := range voter.Inputs.X {
+			voter.Inputs.X[j] = 0
 		}
 		/*for j := 0; j < width; j++ {
 			head.Inputs.X[j] = 1
 		}*/
-		for j, set := range head.Selections {
+		for j, set := range voter.Selections {
 			for i, value := range set.Positions {
-				head.Inputs.X[(j+1)*width+i] = float32(image[value]) / 255
+				voter.Inputs.X[(j+1)*width+i] = float32(image[value]) / 255
 			}
 		}
 
-		head.Head(func(a *tf32.V) bool {
+		voter.Head(func(a *tf32.V) bool {
 			for j := 0; j < 10; j++ {
 				histogram[j].Probability += a.X[j]
 				histogram[j].Index = j
@@ -976,8 +994,8 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		correct := 0
 		for i := range images.Test.Images {
 			var votes [10]int
-			for _, head := range heads {
-				histogram := process(head, i)
+			for _, voter := range voters {
+				histogram := process(voter, i)
 				sort.Slice(histogram, func(i, j int) bool {
 					return histogram[i].Probability > histogram[j].Probability
 				})
@@ -996,9 +1014,9 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		}
 		fmt.Println(correct, len(images.Test.Images))
 	} else {
-		for _, head := range heads {
+		for _, voter := range voters {
 			fmt.Println(images.Test.Labels[test])
-			histogram := process(head, test)
+			histogram := process(voter, test)
 			sort.Slice(histogram, func(i, j int) bool {
 				return histogram[i].Probability > histogram[j].Probability
 			})
