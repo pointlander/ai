@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pointlander/datum/mnist"
 	"github.com/pointlander/gradient/tf32"
@@ -295,6 +296,7 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention Attention) {
 			}
 		}*/
 
+		tf32.Static.Clear()
 		total += tf32.Gradient(cost).X[0]
 		for j, w := range set.Weights {
 			for k, d := range w.D {
@@ -505,7 +507,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	}
 	regularization = tf32.Avg(regularization)
 
-	dropout := tf32.U(func(k tf32.Continuation, a *tf32.V) bool {
+	dropout := tf32.U(func(k tf32.Continuation, node int, a *tf32.V) bool {
 		size, width := len(a.X), a.S[0]
 		c, drops, factor := tf32.NewV(a.S...), make([]int, width), float32(1)/(1-.1)
 		for i := range drops {
@@ -583,6 +585,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	pinf := float32(2/(1-B2) - 1)
 	fmt.Println(pinf)
 	reduced := false
+	start := time.Now()
 	for i < 10*len(images.Train.Images) {
 		index := rnd.Intn(len(images.Train.Images))
 		image := images.Train.Images[index]
@@ -605,6 +608,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		}
 		outputs.X[int(images.Train.Labels[index])] = 1
 
+		tf32.Static.Clear()
 		total += tf32.Gradient(cost).X[0]
 		sum := float32(0.0)
 		for _, p := range gradients {
@@ -687,10 +691,12 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 				reduced = true
 				//eta *= .1
 			}
+			end := time.Since(start)
 			points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
-			fmt.Println(t.Head, i, total)
+			fmt.Println(t.Head, i, total, end)
 			others.Zero()
 			total = 0
+			start = time.Now()
 		}
 
 		if halt || math.IsNaN(float64(total)) {
@@ -830,6 +836,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 			}
 		}*/
 
+		tf32.Static.Clear()
 		head.Head(func(a *tf32.V) bool {
 			for j := 0; j < 10; j++ {
 				histogram[j].Probability += a.X[j]
@@ -923,7 +930,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		concat := tf32.B(Concat)
 		//hadamard := tf32.B(Hadamard)
 
-		dropout := tf32.U(func(k tf32.Continuation, a *tf32.V) bool {
+		dropout := tf32.U(func(k tf32.Continuation, node int, a *tf32.V) bool {
 			return k(a)
 		})
 
@@ -980,6 +987,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 			}
 		}
 
+		tf32.Static.Clear()
 		voter.Head(func(a *tf32.V) bool {
 			for j := 0; j < 10; j++ {
 				histogram[j].Probability += a.X[j]

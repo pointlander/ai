@@ -69,7 +69,7 @@ func ComplexPositionEncoding(input *tc128.V) {
 }
 
 // Quadratic computes the quadratic cost of two tensors
-func Quadratic(k tf32.Continuation, a, b *tf32.V) bool {
+func Quadratic(k tf32.Continuation, node int, a, b *tf32.V) bool {
 	if len(a.S) != 2 || len(b.S) != 2 {
 		panic("tensor needs to have two dimensions")
 	}
@@ -94,7 +94,7 @@ func Quadratic(k tf32.Continuation, a, b *tf32.V) bool {
 }
 
 // ComplexQuadratic computes the quadratic cost of two complex tensors
-func ComplexQuadratic(k tc128.Continuation, a, b *tc128.V) bool {
+func ComplexQuadratic(k tc128.Continuation, node int, a, b *tc128.V) bool {
 	if len(a.S) != 2 || len(b.S) != 2 {
 		panic("tensor needs to have two dimensions")
 	}
@@ -119,7 +119,7 @@ func ComplexQuadratic(k tc128.Continuation, a, b *tc128.V) bool {
 }
 
 // Concat concats two tensors
-func Concat(k tf32.Continuation, a, b *tf32.V) bool {
+func Concat(k tf32.Continuation, node int, a, b *tf32.V) bool {
 	if len(a.S) != 2 || len(b.S) != 2 {
 		panic("tensor needs to have two dimensions")
 	}
@@ -127,14 +127,21 @@ func Concat(k tf32.Continuation, a, b *tf32.V) bool {
 		panic("dimensions are not the same")
 	}
 	c := tf32.NewV(a.S[0]+b.S[0], a.S[1])
-	for i := 0; i < a.S[1]; i++ {
-		for j := 0; j < a.S[0]; j++ {
-			c.X = append(c.X, a.X[i*a.S[0]+j])
-		}
-		for j := 0; j < b.S[0]; j++ {
-			c.X = append(c.X, b.X[i*b.S[0]+j])
+	cached := tf32.Static.Get(node)
+	if cached != nil {
+		c.X = cached
+	}
+	if cached == nil {
+		for i := 0; i < a.S[1]; i++ {
+			for j := 0; j < a.S[0]; j++ {
+				c.X = append(c.X, a.X[i*a.S[0]+j])
+			}
+			for j := 0; j < b.S[0]; j++ {
+				c.X = append(c.X, b.X[i*b.S[0]+j])
+			}
 		}
 	}
+	tf32.Static.Set(node, c.X)
 	if k(&c) {
 		return true
 	}
@@ -150,7 +157,7 @@ func Concat(k tf32.Continuation, a, b *tf32.V) bool {
 }
 
 // ComplexSigmoid computes the sigmoid of a complex tensor
-func ComplexSigmoid(k tc128.Continuation, a *tc128.V) bool {
+func ComplexSigmoid(k tc128.Continuation, node int, a *tc128.V) bool {
 	c := tc128.NewV(a.S...)
 	for _, j := range a.X {
 		c.X = append(c.X, complex(1+math.Cos(cmplx.Phase(j)), 0)*j/2)
@@ -173,7 +180,7 @@ func exp(a float32) float32 {
 }
 
 // Softmax is the softmax function
-func Softmax(k tf32.Continuation, a *tf32.V) bool {
+func Softmax(k tf32.Continuation, node int, a *tf32.V) bool {
 	c, size, sum := tf32.NewV(a.S...), len(a.X), 0.0
 	values := make([]float64, size)
 	for i := 0; i < size; i++ {
@@ -199,7 +206,7 @@ func Softmax(k tf32.Continuation, a *tf32.V) bool {
 }
 
 // Clamp is a clamp activation function
-func Clamp(k tf32.Continuation, a *tf32.V) bool {
+func Clamp(k tf32.Continuation, node int, a *tf32.V) bool {
 	c, size := tf32.NewV(a.S...), len(a.X)
 	for i := 0; i < size; i++ {
 		if ax := a.X[i]; ax > 709 {
@@ -222,7 +229,7 @@ func Clamp(k tf32.Continuation, a *tf32.V) bool {
 }
 
 // Hadamard computes the hadamard product of two tensors
-func Hadamard(k tf32.Continuation, a, b *tf32.V) bool {
+func Hadamard(k tf32.Continuation, node int, a, b *tf32.V) bool {
 	if len(a.S) != 2 || len(b.S) != 2 {
 		panic("tensor needs to have two dimensions")
 	}
@@ -245,7 +252,7 @@ func Hadamard(k tf32.Continuation, a, b *tf32.V) bool {
 }
 
 // SoftmaxBig is the softmax function implemented with big float
-func SoftmaxBig(k tf32.Continuation, a *tf32.V) bool {
+func SoftmaxBig(k tf32.Continuation, node int, a *tf32.V) bool {
 	c, size, sum := tf32.NewV(a.S...), len(a.X), big.NewFloat(0.0)
 	values, done := make([]big.Float, size), make(chan bool, 8)
 	process := func(i int) {
@@ -284,7 +291,7 @@ func SoftmaxBig(k tf32.Continuation, a *tf32.V) bool {
 }
 
 // ReLu is the rectified linear unit function
-func ReLu(k tf32.Continuation, a *tf32.V) bool {
+func ReLu(k tf32.Continuation, node int, a *tf32.V) bool {
 	c := tf32.NewV(a.S[0], a.S[1])
 	for _, j := range a.X {
 		max := j
@@ -392,7 +399,7 @@ func SelectPositions(rnd *rand.Rand, width, height int, positions []Position) {
 }
 
 // PositionEncodingLayer add position encoding to vector
-func PositionEncodingLayer(k tf32.Continuation, a *tf32.V) bool {
+func PositionEncodingLayer(k tf32.Continuation, node int, a *tf32.V) bool {
 	c := tf32.NewV(a.S...)
 	length, width, t := len(a.X), a.S[0], 0.0
 	for i := 0; i < length; i += width {
@@ -419,7 +426,7 @@ func PositionEncodingLayer(k tf32.Continuation, a *tf32.V) bool {
 }
 
 // Mask masks the input data
-func Mask(k tf32.Continuation, a *tf32.V) bool {
+func Mask(k tf32.Continuation, node int, a *tf32.V) bool {
 	width := a.S[0]
 	c := tf32.NewV(width, 1)
 	for i := 0; i < width; i++ {
@@ -435,18 +442,25 @@ func Mask(k tf32.Continuation, a *tf32.V) bool {
 }
 
 // AverageRows averages the rows of a tensor
-func AverageRows(k tf32.Continuation, a *tf32.V) bool {
+func AverageRows(k tf32.Continuation, node int, a *tf32.V) bool {
 	size, width, n := len(a.X), a.S[0], float32(a.S[1])
 	c := tf32.NewV(width)
-	c.X = c.X[:cap(c.X)]
-	for i := 0; i < size; i += width {
-		for j, ax := range a.X[i : i+width] {
-			c.X[j] += ax
+	cached := tf32.Static.Get(node)
+	if cached != nil {
+		c.X = cached
+	}
+	if cached == nil {
+		c.X = c.X[:cap(c.X)]
+		for i := 0; i < size; i += width {
+			for j, ax := range a.X[i : i+width] {
+				c.X[j] += ax
+			}
+		}
+		for i := 0; i < width; i++ {
+			c.X[i] /= n
 		}
 	}
-	for i := 0; i < width; i++ {
-		c.X[i] /= n
-	}
+	tf32.Static.Set(node, c.X)
 	if k(&c) {
 		return true
 	}
@@ -464,7 +478,7 @@ func AverageRows(k tf32.Continuation, a *tf32.V) bool {
 // (1 - 1/n)/s + (x - u)(2/n)(x/n - u)/(-2*s^3)
 // (1 - 1/n)/s - (x - u)(x/n - u)/(n*s^3)
 // (n^2 s^2 - n s^2 - n u^2 + n u x + u x - x^2)/(n^2 s^3)
-func Normalize(k tf32.Continuation, a *tf32.V) bool {
+func Normalize(k tf32.Continuation, node int, a *tf32.V) bool {
 	size, width, n := len(a.X), a.S[0], float32(a.S[1])
 	c, mean := tf32.NewV(a.S...), make([]float32, width)
 	for i := 0; i < size; i += width {
