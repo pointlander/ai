@@ -16,6 +16,68 @@ import (
 	"github.com/pointlander/gradient/tf32"
 )
 
+// Functions are functions for neural networks
+type Functions struct {
+	tf32.Context
+	FConcat      func(a, b tf32.Meta) tf32.Meta
+	FAverageRows func(a tf32.Meta) tf32.Meta
+	FAbs         func(a tf32.Meta) tf32.Meta
+	FAvg         func(a tf32.Meta) tf32.Meta
+	FAdd         func(a, b tf32.Meta) tf32.Meta
+	FMul         func(a, b tf32.Meta) tf32.Meta
+	FSum         func(a tf32.Meta) tf32.Meta
+	FQuadratic   func(a, b tf32.Meta) tf32.Meta
+	FHadamard    func(a, b tf32.Meta) tf32.Meta
+	FSigmoid     func(a tf32.Meta) tf32.Meta
+	FSumRows     func(a tf32.Meta) tf32.Meta
+	FSoftmax     func(a tf32.Meta) tf32.Meta
+	FT           func(a tf32.Meta) tf32.Meta
+	FSoftmax0    func(a tf32.Meta) tf32.Meta
+	FRelu        func(a tf32.Meta) tf32.Meta
+	FNorm        func(a tf32.Meta) tf32.Meta
+	FHadamard0   func(a, b tf32.Meta) tf32.Meta
+}
+
+// CreateFunctions creates functions
+func CreateFunctions() *Functions {
+	f := &Functions{}
+	f.FConcat = tf32.B(Concat)
+	f.FAverageRows = tf32.U(AverageRows)
+	f.FAbs = tf32.U(f.Abs)
+	f.FAvg = tf32.U(f.Avg)
+	f.FAdd = tf32.B(f.Add)
+	f.FMul = tf32.B(f.Mul)
+	f.FSum = tf32.U(f.Sum)
+	f.FQuadratic = tf32.B(f.Quadratic)
+	f.FHadamard = tf32.B(f.Hadamard)
+	f.FSigmoid = tf32.U(f.Sigmoid)
+	f.FSumRows = tf32.U(f.SumRows)
+	f.FSoftmax = tf32.U(f.Softmax)
+	f.FT = tf32.U(f.T)
+	f.FSoftmax0 = tf32.U(Softmax)
+	f.FRelu = tf32.U(ReLu)
+	f.FNorm = tf32.U(Normalize)
+	f.FHadamard0 = tf32.B(Hadamard)
+	return f
+}
+
+// RegularAttention implements the attention mechanism described in
+// https://arxiv.org/abs/1706.03762?amp=1
+func RegularAttention(f *Functions, query, key, value, dk tf32.Meta) tf32.Meta {
+	return f.FT(f.FMul(f.FSoftmax0(f.FHadamard(f.FMul(query, key), dk)), value))
+}
+
+// SimpleAttention implements the attention mechanism described in
+// https://openreview.net/forum?id=pW--cu2FCHY
+func SimpleAttention(f *Functions, query, key, value, dk tf32.Meta) tf32.Meta {
+	return f.FHadamard(f.FSigmoid(query), f.FSumRows(f.FHadamard(f.FSoftmax(key), value)))
+}
+
+// IdentityAttention implements an identity attention
+func IdentityAttention(f *Functions, query, key, value, dk tf32.Meta) tf32.Meta {
+	return value
+}
+
 // PositionEncoding add position encoding to vector
 func PositionEncoding(input *tf32.V) {
 	length, d, t := len(input.X), input.S[0], 0.0
