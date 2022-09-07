@@ -182,13 +182,14 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention Attention) {
 		deltas = append(deltas, make([]float32, len(p.X)))
 	}
 
+	f := CreateFunctions()
 	//quadratic := tf32.B(Quadratic)
-	relu := tf32.U(ReLu)
+	relu := f.FRelu
 	mask := tf32.U(Mask)
-	norm := tf32.U(Normalize)
+	norm := f.FNorm
 	//average := tf32.U(AverageRows)
 	//encode := tf32.U(PositionEncodingLayer)
-	concat := tf32.B(Concat)
+	concat := f.FConcat
 
 	input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 	norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
@@ -272,7 +273,7 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention Attention) {
 			}
 		}*/
 
-		tf32.Static.Clear()
+		f.Clear()
 		total += tf32.Gradient(cost).X[0]
 		for j, w := range set.Weights {
 			for k, d := range w.D {
@@ -577,7 +578,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		}
 		outputs.X[int(images.Train.Labels[index])] = 1
 
-		tf32.Static.Clear()
+		f.Clear()
 		total += tf32.Gradient(cost).X[0]
 		sum := float32(0.0)
 		for _, p := range gradients {
@@ -712,6 +713,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 		Inputs     *tf32.V
 		Selections []Position
 	}
+	f := CreateFunctions()
 	heads := make([]Head, h)
 	for i := range heads {
 		rnd := rand.New(rand.NewSource(int64(i + 1)))
@@ -739,12 +741,12 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 		}
 
 		//quadratic := tf32.B(Quadratic)
-		relu := tf32.U(ReLu)
+		relu := f.FRelu
 		mask := tf32.U(Mask)
-		norm := tf32.U(Normalize)
+		norm := f.FNorm
 		//average := tf32.U(AverageRows)
 		//encode := tf32.U(PositionEncodingLayer)
-		concat := tf32.B(Concat)
+		concat := f.FConcat
 
 		input := tf32.Add(concat(set.Get("position"), tf32.Mul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 		norm_input := tf32.Add(tf32.Hadamard(norm(input), set.Get("n1_1")), set.Get("bn1_1"))
@@ -805,7 +807,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 			}
 		}*/
 
-		tf32.Static.Clear()
+		f.Clear()
 		head.Head(func(a *tf32.V) bool {
 			for j := 0; j < 10; j++ {
 				histogram[j].Probability += a.X[j]
@@ -864,6 +866,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		Inputs     *tf32.V
 		Selections []Position
 	}
+	f := CreateFunctions()
 	voters := make([]Voter, h)
 	for i := range voters {
 		rnd := rand.New(rand.NewSource(int64(i + 1)))
@@ -889,8 +892,6 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		if err != nil {
 			panic(err)
 		}
-
-		f := CreateFunctions()
 
 		dropout := tf32.U(func(k tf32.Continuation, node int, a *tf32.V) bool {
 			return k(a)
@@ -949,7 +950,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 			}
 		}
 
-		tf32.Static.Clear()
+		f.Clear()
 		voter.Head(func(a *tf32.V) bool {
 			for j := 0; j < 10; j++ {
 				histogram[j].Probability += a.X[j]

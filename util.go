@@ -41,8 +41,8 @@ type Functions struct {
 // CreateFunctions creates functions
 func CreateFunctions() *Functions {
 	f := &Functions{}
-	f.FConcat = tf32.B(Concat)
-	f.FAverageRows = tf32.U(AverageRows)
+	f.FConcat = tf32.B(f.Concat)
+	f.FAverageRows = tf32.U(f.AverageRows)
 	f.FAbs = tf32.U(f.Abs)
 	f.FAvg = tf32.U(f.Avg)
 	f.FAdd = tf32.B(f.Add)
@@ -54,10 +54,10 @@ func CreateFunctions() *Functions {
 	f.FSumRows = tf32.U(f.SumRows)
 	f.FSoftmax = tf32.U(f.Softmax)
 	f.FT = tf32.U(f.T)
-	f.FSoftmax0 = tf32.U(Softmax)
-	f.FRelu = tf32.U(ReLu)
-	f.FNorm = tf32.U(Normalize)
-	f.FHadamard0 = tf32.B(Hadamard)
+	f.FSoftmax0 = tf32.U(f.Softmax0)
+	f.FRelu = tf32.U(f.ReLu)
+	f.FNorm = tf32.U(f.Normalize)
+	f.FHadamard0 = tf32.B(f.Hadamard0)
 	return f
 }
 
@@ -181,7 +181,7 @@ func ComplexQuadratic(k tc128.Continuation, node int, a, b *tc128.V) bool {
 }
 
 // Concat concats two tensors
-func Concat(k tf32.Continuation, node int, a, b *tf32.V) bool {
+func (f *Functions) Concat(k tf32.Continuation, node int, a, b *tf32.V) bool {
 	if len(a.S) != 2 || len(b.S) != 2 {
 		panic("tensor needs to have two dimensions")
 	}
@@ -189,7 +189,7 @@ func Concat(k tf32.Continuation, node int, a, b *tf32.V) bool {
 		panic("dimensions are not the same")
 	}
 	c := tf32.NewV(a.S[0]+b.S[0], a.S[1])
-	cached := tf32.Static.Get(node)
+	cached := f.Get(node)
 	if cached != nil {
 		c.X = cached
 	}
@@ -203,7 +203,7 @@ func Concat(k tf32.Continuation, node int, a, b *tf32.V) bool {
 			}
 		}
 	}
-	tf32.Static.Set(node, c.X)
+	f.Set(node, c.X)
 	if k(&c) {
 		return true
 	}
@@ -241,8 +241,8 @@ func exp(a float32) float32 {
 	return float32(math.Exp(float64(a)))
 }
 
-// Softmax is the softmax function
-func Softmax(k tf32.Continuation, node int, a *tf32.V) bool {
+// Softmax0 is the softmax function
+func (f *Functions) Softmax0(k tf32.Continuation, node int, a *tf32.V) bool {
 	c, size, sum := tf32.NewV(a.S...), len(a.X), 0.0
 	values := make([]float64, size)
 	for i := 0; i < size; i++ {
@@ -291,7 +291,7 @@ func Clamp(k tf32.Continuation, node int, a *tf32.V) bool {
 }
 
 // Hadamard computes the hadamard product of two tensors
-func Hadamard(k tf32.Continuation, node int, a, b *tf32.V) bool {
+func (f *Functions) Hadamard0(k tf32.Continuation, node int, a, b *tf32.V) bool {
 	if len(a.S) != 2 || len(b.S) != 2 {
 		panic("tensor needs to have two dimensions")
 	}
@@ -300,9 +300,16 @@ func Hadamard(k tf32.Continuation, node int, a, b *tf32.V) bool {
 		panic("dimensions are not the same")
 	}
 	c := tf32.NewV(a.S...)
-	for i, j := range a.X {
-		c.X = append(c.X, j*b.X[i%length])
+	cached := f.Get(node)
+	if cached != nil {
+		c.X = cached
 	}
+	if cached == nil {
+		for i, j := range a.X {
+			c.X = append(c.X, j*b.X[i%length])
+		}
+	}
+	f.Set(node, c.X)
 	if k(&c) {
 		return true
 	}
@@ -353,15 +360,22 @@ func SoftmaxBig(k tf32.Continuation, node int, a *tf32.V) bool {
 }
 
 // ReLu is the rectified linear unit function
-func ReLu(k tf32.Continuation, node int, a *tf32.V) bool {
+func (f *Functions) ReLu(k tf32.Continuation, node int, a *tf32.V) bool {
 	c := tf32.NewV(a.S[0], a.S[1])
-	for _, j := range a.X {
-		max := j
-		if max < 0 {
-			max = 0
-		}
-		c.X = append(c.X, max)
+	cached := f.Get(node)
+	if cached != nil {
+		c.X = cached
 	}
+	if cached == nil {
+		for _, j := range a.X {
+			max := j
+			if max < 0 {
+				max = 0
+			}
+			c.X = append(c.X, max)
+		}
+	}
+	f.Set(node, c.X)
 	if k(&c) {
 		return true
 	}
@@ -504,10 +518,10 @@ func Mask(k tf32.Continuation, node int, a *tf32.V) bool {
 }
 
 // AverageRows averages the rows of a tensor
-func AverageRows(k tf32.Continuation, node int, a *tf32.V) bool {
+func (f *Functions) AverageRows(k tf32.Continuation, node int, a *tf32.V) bool {
 	size, width, n := len(a.X), a.S[0], float32(a.S[1])
 	c := tf32.NewV(width)
-	cached := tf32.Static.Get(node)
+	cached := f.Get(node)
 	if cached != nil {
 		c.X = cached
 	}
@@ -522,7 +536,7 @@ func AverageRows(k tf32.Continuation, node int, a *tf32.V) bool {
 			c.X[i] /= n
 		}
 	}
-	tf32.Static.Set(node, c.X)
+	f.Set(node, c.X)
 	if k(&c) {
 		return true
 	}
@@ -540,7 +554,7 @@ func AverageRows(k tf32.Continuation, node int, a *tf32.V) bool {
 // (1 - 1/n)/s + (x - u)(2/n)(x/n - u)/(-2*s^3)
 // (1 - 1/n)/s - (x - u)(x/n - u)/(n*s^3)
 // (n^2 s^2 - n s^2 - n u^2 + n u x + u x - x^2)/(n^2 s^3)
-func Normalize(k tf32.Continuation, node int, a *tf32.V) bool {
+func (f *Functions) Normalize(k tf32.Continuation, node int, a *tf32.V) bool {
 	size, width, n := len(a.X), a.S[0], float32(a.S[1])
 	c, mean := tf32.NewV(a.S...), make([]float32, width)
 	for i := 0; i < size; i += width {
