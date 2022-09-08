@@ -362,6 +362,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	// 7144 10000 Simple row based softmax
 	// 8872 10000 Simple with 64 float wide
 	// 8919 10000 Simple with 8 heads
+	// 9520 10000 Simple with 8 heads and 2 layers
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
