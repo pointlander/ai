@@ -64,7 +64,7 @@ const (
 )
 
 // RegularHead implements the regular head
-func (t Configuration) RegularHead(f *Functions, dropout func(a tf32.Meta) tf32.Meta, l, h int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
+func (t Configuration) RegularHead(f *Functions, l, h int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
 	norm_input := f.FAdd(f.FHadamard(f.FNorm(input), set.Get(fmt.Sprintf("n%d_%d_1", l, h))), set.Get(fmt.Sprintf("bn%d_%d_1", l, h)))
 	query := f.FMul(set.Get(fmt.Sprintf("query%d_%d", l, h)), norm_input)
 	key := f.FMul(set.Get(fmt.Sprintf("key%d_%d", l, h)), norm_input)
@@ -72,23 +72,23 @@ func (t Configuration) RegularHead(f *Functions, dropout func(a tf32.Meta) tf32.
 	if t.Swap {
 		value = f.FMul(norm_input, set.Get(fmt.Sprintf("value%d_%d", l, h)))
 	}
-	l1 := f.FAdd(dropout(t.Attention(f, query, key, value, others.Get("dk"))), input)
+	l1 := f.FAdd(f.FDropout(t.Attention(f, query, key, value, others.Get("dk"))), input)
 	norm_l1 := f.FAdd(f.FHadamard(f.FNorm(l1), set.Get(fmt.Sprintf("n%d_%d_2", l, h))), set.Get(fmt.Sprintf("bn%d_%d_2", l, h)))
-	return f.FAdd(dropout(f.FAdd(f.FMul(set.Get(fmt.Sprintf("W%d_%d_2", l, h)),
+	return f.FAdd(f.FDropout(f.FAdd(f.FMul(set.Get(fmt.Sprintf("W%d_%d_2", l, h)),
 		f.FRelu(f.FAdd(f.FMul(set.Get(fmt.Sprintf("W%d_%d_1", l, h)), norm_l1), set.Get(fmt.Sprintf("b%d_%d_1", l, h))))),
 		set.Get(fmt.Sprintf("b%d_%d_2", l, h)))), l1)
 }
 
 // ReZeroHead implements the ReZero head
-func (t Configuration) ReZeroHead(f *Functions, dropout func(a tf32.Meta) tf32.Meta, l, h int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
+func (t Configuration) ReZeroHead(f *Functions, l, h int, input tf32.Meta, set, others tf32.Set) tf32.Meta {
 	query := f.FMul(set.Get(fmt.Sprintf("query%d_%d", l, h)), input)
 	key := f.FMul(set.Get(fmt.Sprintf("key%d_%d", l, h)), input)
 	value := f.FMul(set.Get(fmt.Sprintf("value%d_%d", l, h)), input)
 	if t.Swap {
 		value = f.FMul(input, set.Get(fmt.Sprintf("value%d_%d", l, h)))
 	}
-	l1 := f.FAdd(f.FHadamard0(dropout(t.Attention(f, query, key, value, others.Get("dk"))), set.Get(fmt.Sprintf("a%d_%d_1", l, h))), input)
-	return f.FAdd(f.FHadamard0(dropout(f.FAdd(f.FMul(set.Get(fmt.Sprintf("W%d_%d_2", l, h)),
+	l1 := f.FAdd(f.FHadamard0(f.FDropout(t.Attention(f, query, key, value, others.Get("dk"))), set.Get(fmt.Sprintf("a%d_%d_1", l, h))), input)
+	return f.FAdd(f.FHadamard0(f.FDropout(f.FAdd(f.FMul(set.Get(fmt.Sprintf("W%d_%d_2", l, h)),
 		f.FRelu(f.FAdd(f.FMul(set.Get(fmt.Sprintf("W%d_%d_1", l, h)), l1), set.Get(fmt.Sprintf("b%d_%d_1", l, h))))),
 		set.Get(fmt.Sprintf("b%d_%d_2", l, h)))), set.Get(fmt.Sprintf("a%d_%d_2", l, h))), l1)
 }
@@ -182,7 +182,7 @@ func ProbabilisticTransformer(head int, hiddenSize int, attention Attention) {
 		deltas = append(deltas, make([]float32, len(p.X)))
 	}
 
-	f := CreateFunctions()
+	f := CreateFunctions(false)
 	//quadratic := tf32.B(Quadratic)
 	relu := f.FRelu
 	mask := tf32.U(Mask)
@@ -455,7 +455,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		adam = append(adam, make([]Adam, len(p.X)))
 	}
 
-	f := CreateFunctions()
+	f := CreateFunctions(false)
 
 	regularization := f.FConcat(f.FAvg(f.FAbs(set.Get("encode"))), f.FAvg(f.FAbs(set.Get("position"))))
 	regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get("biasEncode"))))
@@ -478,43 +478,14 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	}
 	regularization = f.FAvg(regularization)
 
-	dropout := tf32.U(func(k tf32.Continuation, node int, a *tf32.V) bool {
-		size, width := len(a.X), a.S[0]
-		c, drops, factor := tf32.NewV(a.S...), make([]int, width), float32(1)/(1-.1)
-		for i := range drops {
-			if rnd.Float64() > .1 {
-				drops[i] = 1
-			}
-		}
-		c.X = c.X[:cap(c.X)]
-		for i := 0; i < size; i += width {
-			for j, ax := range a.X[i : i+width] {
-				if drops[j] == 1 {
-					c.X[i+j] = ax * factor
-				}
-			}
-		}
-		if k(&c) {
-			return true
-		}
-		for i := 0; i < size; i += width {
-			for j := range a.D[i : i+width] {
-				if drops[j] == 1 {
-					a.D[i+j] += c.D[i+j]
-				}
-			}
-		}
-		return false
-	})
-
 	next := f.FAdd(f.FConcat(set.Get("position"), f.FMul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 	var heads [Layers][Heads]tf32.Meta
 	for l := range heads {
 		for h := range heads[l] {
 			if t.HeadType == HeadTypeRegular {
-				heads[l][h] = t.RegularHead(f, dropout, l, h, next, set, others)
+				heads[l][h] = t.RegularHead(f, l, h, next, set, others)
 			} else if t.HeadType == HeadTypeReZero {
-				heads[l][h] = t.ReZeroHead(f, dropout, l, h, next, set, others)
+				heads[l][h] = t.ReZeroHead(f, l, h, next, set, others)
 			} else {
 				panic(fmt.Errorf("%d invalid head type", t.HeadType))
 			}
@@ -714,7 +685,7 @@ func InferenceProbabilisticTransformer(h, test int, name string, hiddenSize int,
 		Inputs     *tf32.V
 		Selections []Position
 	}
-	f := CreateFunctions()
+	f := CreateFunctions(true)
 	heads := make([]Head, h)
 	for i := range heads {
 		rnd := rand.New(rand.NewSource(int64(i + 1)))
@@ -867,7 +838,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		Inputs     *tf32.V
 		Selections []Position
 	}
-	f := CreateFunctions()
+	f := CreateFunctions(true)
 	voters := make([]Voter, h)
 	for i := range voters {
 		rnd := rand.New(rand.NewSource(int64(i + 1)))
@@ -894,18 +865,14 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 			panic(err)
 		}
 
-		dropout := tf32.U(func(k tf32.Continuation, node int, a *tf32.V) bool {
-			return k(a)
-		})
-
 		next := f.FAdd(f.FConcat(set.Get("position"), f.FMul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
 		var heads [Layers][Heads]tf32.Meta
 		for l := range heads {
 			for h := range heads[l] {
 				if t.HeadType == HeadTypeRegular {
-					heads[l][h] = t.RegularHead(f, dropout, l, h, next, set, others)
+					heads[l][h] = t.RegularHead(f, l, h, next, set, others)
 				} else if t.HeadType == HeadTypeReZero {
-					heads[l][h] = t.ReZeroHead(f, dropout, l, h, next, set, others)
+					heads[l][h] = t.ReZeroHead(f, l, h, next, set, others)
 				} else {
 					panic(fmt.Errorf("%d invalid head type", t.HeadType))
 				}

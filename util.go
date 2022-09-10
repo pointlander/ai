@@ -19,6 +19,7 @@ import (
 // Functions are functions for neural networks
 type Functions struct {
 	tf32.Context
+	Rnd          *rand.Rand
 	FConcat      func(a, b tf32.Meta) tf32.Meta
 	FAverageRows func(a tf32.Meta) tf32.Meta
 	FAbs         func(a tf32.Meta) tf32.Meta
@@ -36,11 +37,14 @@ type Functions struct {
 	FRelu        func(a tf32.Meta) tf32.Meta
 	FNorm        func(a tf32.Meta) tf32.Meta
 	FHadamard0   func(a, b tf32.Meta) tf32.Meta
+	FDropout     func(a tf32.Meta) tf32.Meta
 }
 
 // CreateFunctions creates functions
-func CreateFunctions() *Functions {
-	f := &Functions{}
+func CreateFunctions(dummy bool) *Functions {
+	f := &Functions{
+		Rnd: rand.New(rand.NewSource(1)),
+	}
 	f.FConcat = tf32.B(f.Concat)
 	f.FAverageRows = tf32.U(f.AverageRows)
 	f.FAbs = tf32.U(f.Abs)
@@ -58,6 +62,13 @@ func CreateFunctions() *Functions {
 	f.FRelu = tf32.U(f.ReLu)
 	f.FNorm = tf32.U(f.Normalize)
 	f.FHadamard0 = tf32.B(f.Hadamard0)
+	if dummy {
+		f.FDropout = tf32.U(func(k tf32.Continuation, node int, a *tf32.V) bool {
+			return k(a)
+		})
+	} else {
+		f.FDropout = tf32.U(f.Dropout)
+	}
 	return f
 }
 
@@ -316,6 +327,43 @@ func (f *Functions) Hadamard0(k tf32.Continuation, node int, a, b *tf32.V) bool 
 	for i, j := range c.D {
 		a.D[i] += j * b.X[i%length]
 		b.D[i%length] += j * a.X[i]
+	}
+	return false
+}
+
+// Dropout is a dropout regularization function
+func (f *Functions) Dropout(k tf32.Continuation, node int, a *tf32.V) bool {
+	size, width := len(a.X), a.S[0]
+	c, drops, factor := tf32.NewV(a.S...), make([]int, width), float32(1)/(1-.1)
+	for i := range drops {
+		if f.Rnd.Float64() > .1 {
+			drops[i] = 1
+		}
+	}
+	cached := f.Get(node)
+	if cached != nil {
+		c.X = cached
+	}
+	if cached == nil {
+		c.X = c.X[:cap(c.X)]
+		for i := 0; i < size; i += width {
+			for j, ax := range a.X[i : i+width] {
+				if drops[j] == 1 {
+					c.X[i+j] = ax * factor
+				}
+			}
+		}
+	}
+	f.Set(node, c.X)
+	if k(&c) {
+		return true
+	}
+	for i := 0; i < size; i += width {
+		for j := range a.D[i : i+width] {
+			if drops[j] == 1 {
+				a.D[i+j] += c.D[i+j]
+			}
+		}
 	}
 	return false
 }
