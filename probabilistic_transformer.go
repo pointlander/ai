@@ -93,6 +93,34 @@ func (t Configuration) ReZeroHead(f *Functions, l, h int, input tf32.Meta, set, 
 		set.Get(fmt.Sprintf("b%d_%d_2", l, h)))), set.Get(fmt.Sprintf("a%d_%d_2", l, h))), l1)
 }
 
+func (t Configuration) Circuit(f *Functions, set, others tf32.Set) tf32.Meta {
+	next := f.FAdd(f.FConcat(set.Get("position"), f.FMul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
+	var heads [Layers][Heads]tf32.Meta
+	for l := range heads {
+		for h := range heads[l] {
+			if t.HeadType == HeadTypeRegular {
+				heads[l][h] = t.RegularHead(f, l, h, next, set, others)
+			} else if t.HeadType == HeadTypeReZero {
+				heads[l][h] = t.ReZeroHead(f, l, h, next, set, others)
+			} else {
+				panic(fmt.Errorf("%d invalid head type", t.HeadType))
+			}
+		}
+		cat := f.FConcat(f.FAverageRows(heads[l][0]), f.FAverageRows(heads[l][1]))
+		for i := 2; i < Heads; i++ {
+			cat = f.FConcat(cat, f.FAverageRows(heads[l][i]))
+		}
+		if l < Layers-1 {
+			cat = f.FConcat(heads[l][0], heads[l][1])
+			for i := 2; i < Heads; i++ {
+				cat = f.FConcat(cat, heads[l][i])
+			}
+		}
+		next = f.FAdd(f.FMul(set.Get(fmt.Sprintf("project%d", l)), cat), set.Get(fmt.Sprintf("bias%d", l)))
+	}
+	return next
+}
+
 // ProbabilisticTransformer is a probabilistic transformer
 func ProbabilisticTransformer(head int, hiddenSize int, attention Attention) {
 	// 5329 10000 SelectedPositionEncoding
@@ -457,6 +485,8 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 	f := CreateFunctions(false)
 
+	circuit := t.Circuit(f, set, others)
+
 	regularization := f.FConcat(f.FAvg(f.FAbs(set.Get("encode"))), f.FAvg(f.FAbs(set.Get("position"))))
 	regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get("biasEncode"))))
 	for l := 0; l < Layers; l++ {
@@ -478,32 +508,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	}
 	regularization = f.FAvg(regularization)
 
-	next := f.FAdd(f.FConcat(set.Get("position"), f.FMul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
-	var heads [Layers][Heads]tf32.Meta
-	for l := range heads {
-		for h := range heads[l] {
-			if t.HeadType == HeadTypeRegular {
-				heads[l][h] = t.RegularHead(f, l, h, next, set, others)
-			} else if t.HeadType == HeadTypeReZero {
-				heads[l][h] = t.ReZeroHead(f, l, h, next, set, others)
-			} else {
-				panic(fmt.Errorf("%d invalid head type", t.HeadType))
-			}
-		}
-		cat := f.FConcat(f.FAverageRows(heads[l][0]), f.FAverageRows(heads[l][1]))
-		for i := 2; i < Heads; i++ {
-			cat = f.FConcat(cat, f.FAverageRows(heads[l][i]))
-		}
-		if l < Layers-1 {
-			cat = f.FConcat(heads[l][0], heads[l][1])
-			for i := 2; i < Heads; i++ {
-				cat = f.FConcat(cat, heads[l][i])
-			}
-		}
-		next = f.FAdd(f.FMul(set.Get(fmt.Sprintf("project%d", l)), cat), set.Get(fmt.Sprintf("bias%d", l)))
-	}
-
-	cost := f.FAdd(f.FSum(f.FQuadratic(next, others.Get("output"))), regularization)
+	cost := f.FAdd(f.FSum(f.FQuadratic(circuit, others.Get("output"))), regularization)
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -865,33 +870,10 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 			panic(err)
 		}
 
-		next := f.FAdd(f.FConcat(set.Get("position"), f.FMul(set.Get("encode"), others.Get("input"))), set.Get("biasEncode"))
-		var heads [Layers][Heads]tf32.Meta
-		for l := range heads {
-			for h := range heads[l] {
-				if t.HeadType == HeadTypeRegular {
-					heads[l][h] = t.RegularHead(f, l, h, next, set, others)
-				} else if t.HeadType == HeadTypeReZero {
-					heads[l][h] = t.ReZeroHead(f, l, h, next, set, others)
-				} else {
-					panic(fmt.Errorf("%d invalid head type", t.HeadType))
-				}
-			}
-			cat := f.FConcat(f.FAverageRows(heads[l][0]), f.FAverageRows(heads[l][1]))
-			for i := 2; i < Heads; i++ {
-				cat = f.FConcat(cat, f.FAverageRows(heads[l][i]))
-			}
-			if l < Layers-1 {
-				cat = f.FConcat(heads[l][0], heads[l][1])
-				for i := 2; i < Heads; i++ {
-					cat = f.FConcat(cat, heads[l][i])
-				}
-			}
-			next = f.FAdd(f.FMul(set.Get(fmt.Sprintf("project%d", l)), cat), set.Get(fmt.Sprintf("bias%d", l)))
-		}
+		circuit := t.Circuit(f, set, others)
 
 		voters[i] = Voter{
-			Head:       next,
+			Head:       circuit,
 			Inputs:     inputs,
 			Selections: selections,
 		}
