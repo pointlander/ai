@@ -473,11 +473,6 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		}
 	}
 
-	gradients := make([][]float32, 0, 8)
-	for _, p := range set.Weights {
-		gradients = append(gradients, make([]float32, len(p.X)))
-	}
-
 	adam := make([][]Adam, 0, 8)
 	for _, p := range set.Weights {
 		adam = append(adam, make([]Adam, len(p.X)))
@@ -557,60 +552,22 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 		f.Clear()
 		total += tf32.Gradient(cost).X[0]
-		sum := float32(0.0)
-		for _, p := range gradients {
-			for _, d := range p {
-				sum += d * d
-			}
-		}
-		norm := math.Sqrt(float64(sum))
-		scaling := float32(1.0)
-		if norm > 1 {
-			scaling = 1 / float32(norm)
-		}
-		_ = scaling
-		for j, w := range set.Weights {
-			for k, d := range w.D {
-				gradients[j][k] += d //* scaling
-			}
-		}
-		set.Zero()
-		others.Zero()
 
 		if i > 0 && i%BatchSize == 0 {
-			sum := float32(0.0)
-			/*for _, p := range set.Weights {
-				for _, d := range p.D {
-					sum += d * d
-				}
-			}*/
-			for _, p := range gradients {
-				for _, d := range p {
-					d /= BatchSize
-					sum += d * d
-				}
-			}
-			norm := math.Sqrt(float64(sum))
-			scaling := float32(1.0)
-			if norm > 1 {
-				scaling = 1 / float32(norm)
-			}
-
 			u++
 			b1, b2 := pow(B1), pow(B2)
 			for j, w := range set.Weights {
-				for k := range w.D {
+				for k, d := range w.D {
 					//deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
 					//set.Weights[j].X[k] += deltas[j][k]
 					_ = alpha
 					//set.Weights[j].X[k] -= eta * gradients[j][k] / BatchSize * scaling
-					_ = scaling
-					g := gradients[j][k] / BatchSize
+					g := d / BatchSize
 					m := B1*adam[j][k].M + (1-B1)*g
 					v := B2*adam[j][k].V + (1-B2)*g*g
 					adam[j][k].M = m
 					adam[j][k].V = v
-					gradients[j][k] = 0
+					w.D[k] = 0
 					mhat := m / (1 - b1)
 					/*pt := pinf - 2*float32(u)*b2/(1-b2)
 					if pt > 4 {
@@ -641,6 +598,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 			end := time.Since(start)
 			points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
 			fmt.Println(t.Head, i, total, end)
+			set.Zero()
 			others.Zero()
 			total = 0
 			start = time.Now()
