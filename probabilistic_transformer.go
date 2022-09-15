@@ -557,9 +557,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	process := func(i int, descents []int) {
 		others := processes[i].others
 		inputs, outputs := others.ByName["input"], others.ByName["output"]
-		f := processes[i].f
-		cost := processes[i].cost
-		total := float32(0.0)
+		f, cost, total := processes[i].f, processes[i].cost, float32(0.0)
 		for _, index := range descents {
 			image := images.Train.Images[index]
 
@@ -625,8 +623,8 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		}
 		for j := 1; j < len(processes); j++ {
 			for k, p := range processes[j].set.Weights {
-				for l := range p.D {
-					processes[0].set.Weights[k].D[l] += p.D[l]
+				for l, d := range p.D {
+					processes[0].set.Weights[k].D[l] += d
 				}
 			}
 			processes[j].set.Zero()
@@ -646,7 +644,6 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 				v := B2*adam[j][k].V + (1-B2)*g*g
 				adam[j][k].M = m
 				adam[j][k].V = v
-				w.D[k] = 0
 				mhat := m / (1 - b1)
 				/*pt := pinf - 2*float32(u)*b2/(1-b2)
 				if pt > 4 {
@@ -675,17 +672,18 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 			//eta *= .1
 		}
 		end := time.Since(start)
-		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
 		fmt.Println(t.Head, i, total, end)
 		set.Zero()
 		others.Zero()
-		total = 0
 		start = time.Now()
 
 		if halt || math.IsNaN(float64(total)) {
 			fmt.Println(total)
 			break
 		}
+		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
+		total = 0
+
 		if batch%10 == 0 {
 			set.Save(fmt.Sprintf("%d_%d_set.w", t.Head, i), total, i)
 		}
