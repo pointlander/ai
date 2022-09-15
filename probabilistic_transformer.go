@@ -403,6 +403,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	// 8872 10000 Simple with 64 float wide
 	// 8919 10000 Simple with 8 heads
 	// 9520 10000 Simple with 8 heads and 2 layers
+	// 8822 10000 Parallelize
 	fmt.Println(NumSets, NumDescents)
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
