@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -25,7 +26,9 @@ import (
 
 const (
 	// BatchSize is the size of a batch
-	BatchSize = 100
+	BatchSize = 128
+	// CPUSPerSet is the number of CPUs per set
+	CPUSPerSet = 8
 	// B1 exponential decay of the rate for the first moment estimates
 	B1 = 0.9
 	// B2 exponential decay rate for the second-moment estimates
@@ -61,6 +64,15 @@ const (
 	HeadTypeRegular HeadType = iota
 	// HeadTypeReZero is the ReZero head type
 	HeadTypeReZero
+)
+
+var (
+	// NumCPUS is the number of cpus
+	NumCPUS = runtime.NumCPU()
+	// NumSets is the number of sets
+	NumSets = NumCPUS / CPUSPerSet
+	// NumDescents is the number of descents
+	NumDescents = BatchSize / NumSets
 )
 
 // RegularHead implements the regular head
@@ -391,6 +403,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	// 8872 10000 Simple with 64 float wide
 	// 8919 10000 Simple with 8 heads
 	// 9520 10000 Simple with 8 heads and 2 layers
+	fmt.Println(NumSets, NumDescents)
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
 	if err != nil {
@@ -403,6 +416,15 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	}
 	SelectPositions(rnd, images.Train.Width, images.Train.Height, selections)
 
+	type Process struct {
+		others tf32.Set
+		set    tf32.Set
+		cost   tf32.Meta
+		f      *Functions
+	}
+
+	processes := make([]Process, NumSets)
+
 	others := tf32.NewSet()
 	others.Add("input", width, size)
 	others.Add("output", 10, 1)
@@ -412,7 +434,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	for _, w := range others.Weights {
 		w.X = w.X[:cap(w.X)]
 	}
-	inputs, outputs, dk := others.ByName["input"], others.ByName["output"], others.ByName["dk"]
+	dk := others.ByName["dk"]
 	for i := range dk.X {
 		dk.X[i] = 1 / float32(math.Sqrt(float64(size)))
 	}
@@ -473,37 +495,98 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		}
 	}
 
+	processes[0].others = others
+	processes[0].set = set
+	for i := 1; i < len(processes); i++ {
+		others := tf32.NewSet()
+		others.Add("input", width, size)
+		others.Add("output", 10, 1)
+		others.Add("dk", size, 1)
+		others.Add("alpha", 1, 1)
+
+		for _, w := range others.Weights {
+			w.X = w.X[:cap(w.X)]
+		}
+		dk := others.ByName["dk"]
+		for i := range dk.X {
+			dk.X[i] = 1 / float32(math.Sqrt(float64(size)))
+		}
+		others.ByName["alpha"].X[0] = 0.01
+		processes[i].others = others
+		processes[i].set = set.Copy()
+	}
+
 	adam := make([][]Adam, 0, 8)
 	for _, p := range set.Weights {
 		adam = append(adam, make([]Adam, len(p.X)))
 	}
 
-	f := CreateFunctions(false)
+	for i := range processes {
+		others, set := processes[i].others, processes[i].set
 
-	circuit := t.Circuit(f, set, others)
+		f := CreateFunctions(false)
+		processes[i].f = f
 
-	regularization := f.FConcat(f.FAvg(f.FAbs(set.Get("encode"))), f.FAvg(f.FAbs(set.Get("position"))))
-	regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get("biasEncode"))))
-	for l := 0; l < Layers; l++ {
-		for h := 0; h < Heads; h++ {
-			regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("query%d_%d", l, h)))))
-			regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("key%d_%d", l, h)))))
-			regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("value%d_%d", l, h)))))
+		circuit := t.Circuit(f, set, others)
+
+		regularization := f.FConcat(f.FAvg(f.FAbs(set.Get("encode"))), f.FAvg(f.FAbs(set.Get("position"))))
+		regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get("biasEncode"))))
+		for l := 0; l < Layers; l++ {
+			for h := 0; h < Heads; h++ {
+				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("query%d_%d", l, h)))))
+				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("key%d_%d", l, h)))))
+				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("value%d_%d", l, h)))))
+				if l < Layers-1 {
+					regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("W%d_%d_1", l, h)))))
+					regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("b%d_%d_1", l, h)))))
+					regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("W%d_%d_2", l, h)))))
+					regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("b%d_%d_2", l, h)))))
+				}
+			}
 			if l < Layers-1 {
-				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("W%d_%d_1", l, h)))))
-				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("b%d_%d_1", l, h)))))
-				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("W%d_%d_2", l, h)))))
-				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("b%d_%d_2", l, h)))))
+				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("project%d", l)))))
+				regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("bias%d", l)))))
 			}
 		}
-		if l < Layers-1 {
-			regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("project%d", l)))))
-			regularization = f.FConcat(regularization, f.FAvg(f.FAbs(set.Get(fmt.Sprintf("bias%d", l)))))
-		}
-	}
-	regularization = f.FAvg(regularization)
+		regularization = f.FAvg(regularization)
 
-	cost := f.FAdd(f.FSum(f.FQuadratic(circuit, others.Get("output"))), regularization)
+		processes[i].cost = f.FAdd(f.FSum(f.FQuadratic(circuit, others.Get("output"))), regularization)
+	}
+
+	done := make(chan float32)
+	process := func(i int, descents []int) {
+		others := processes[i].others
+		inputs, outputs := others.ByName["input"], others.ByName["output"]
+		f := processes[i].f
+		cost := processes[i].cost
+		total := float32(0.0)
+		for _, index := range descents {
+			image := images.Train.Images[index]
+
+			for j := range inputs.X {
+				inputs.X[j] = 0
+			}
+			for j := range outputs.X {
+				outputs.X[j] = 0
+			}
+
+			/*for j := 0; j < width; j++ {
+				inputs.X[j] = 1
+			}*/
+			for j, set := range selections {
+				for i, value := range set.Positions {
+					inputs.X[(j+1)*width+i] =
+						float32(image[value]) / 255
+				}
+			}
+			outputs.X[int(images.Train.Labels[index])] = 1
+
+			f.Clear()
+			total += tf32.Gradient(cost).X[0]
+		}
+
+		done <- total
+	}
 
 	c, halt := make(chan os.Signal), false
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -514,7 +597,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 
 	alpha, eta, iterations := float32(.001), float32(.001), len(images.Train.Images)
 	points := make(plotter.XYs, 0, iterations)
-	i := 0
+	i, batch := 0, 0
 	total := float32(0.0)
 	u := 0.0
 	pow := func(x float32) float32 {
@@ -529,89 +612,84 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	reduced := false
 	start := time.Now()
 	for i < 10*len(images.Train.Images) {
-		index := rnd.Intn(len(images.Train.Images))
-		image := images.Train.Images[index]
-
-		for j := range inputs.X {
-			inputs.X[j] = 0
-		}
-		for j := range outputs.X {
-			outputs.X[j] = 0
-		}
-
-		/*for j := 0; j < width; j++ {
-			inputs.X[j] = 1
-		}*/
-		for j, set := range selections {
-			for i, value := range set.Positions {
-				inputs.X[(j+1)*width+i] =
-					float32(image[value]) / 255
+		for j := range processes {
+			descents := make([]int, NumDescents)
+			for k := range descents {
+				descents[k] = rnd.Intn(len(images.Train.Images))
 			}
+			go process(j, descents)
 		}
-		outputs.X[int(images.Train.Labels[index])] = 1
-
-		f.Clear()
-		total += tf32.Gradient(cost).X[0]
-
-		if i > 0 && i%BatchSize == 0 {
-			u++
-			b1, b2 := pow(B1), pow(B2)
-			for j, w := range set.Weights {
-				for k, d := range w.D {
-					//deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
-					//set.Weights[j].X[k] += deltas[j][k]
-					_ = alpha
-					//set.Weights[j].X[k] -= eta * gradients[j][k] / BatchSize * scaling
-					g := d / BatchSize
-					m := B1*adam[j][k].M + (1-B1)*g
-					v := B2*adam[j][k].V + (1-B2)*g*g
-					adam[j][k].M = m
-					adam[j][k].V = v
-					w.D[k] = 0
-					mhat := m / (1 - b1)
-					/*pt := pinf - 2*float32(u)*b2/(1-b2)
-					if pt > 4 {
-						if v == 0 {
-							v = 1e-8
-						}
-						lt := float32(math.Sqrt(float64((1 - b2) / v)))
-						rt := float32(math.Sqrt(float64(((pt - 4) * (pt - 2) * pinf) / ((pinf - 4) * (pinf - 2) * pt))))
-						if math.IsNaN(float64(lt)) || math.IsInf(float64(lt), 0) {
-							panic(fmt.Errorf("lt is nan %f %f", lt, v))
-						}
-						if math.IsNaN(float64(rt)) || math.IsInf(float64(rt), 0) {
-							panic(fmt.Errorf("rt is nan %f", rt))
-						}
-						set.Weights[j].X[k] -= eta * rt * mhat * lt
-					} else {
-						set.Weights[j].X[k] -= eta * mhat
-					}*/
-					vhat := v / (1 - b2)
-					set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+		for range processes {
+			i += NumDescents
+			total += <-done
+		}
+		for j := 1; j < len(processes); j++ {
+			for k, p := range processes[j].set.Weights {
+				for l := range p.D {
+					processes[0].set.Weights[k].D[l] += p.D[l]
 				}
 			}
-			total /= BatchSize
-			if !reduced && total < .5 {
-				reduced = true
-				//eta *= .1
-			}
-			end := time.Since(start)
-			points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
-			fmt.Println(t.Head, i, total, end)
-			set.Zero()
-			others.Zero()
-			total = 0
-			start = time.Now()
+			processes[j].set.Zero()
+			processes[j].others.Zero()
 		}
+
+		u++
+		b1, b2 := pow(B1), pow(B2)
+		for j, w := range set.Weights {
+			for k, d := range w.D {
+				//deltas[j][k] = alpha*deltas[j][k] - eta*d*scaling
+				//set.Weights[j].X[k] += deltas[j][k]
+				_ = alpha
+				//set.Weights[j].X[k] -= eta * gradients[j][k] / BatchSize * scaling
+				g := d / BatchSize
+				m := B1*adam[j][k].M + (1-B1)*g
+				v := B2*adam[j][k].V + (1-B2)*g*g
+				adam[j][k].M = m
+				adam[j][k].V = v
+				w.D[k] = 0
+				mhat := m / (1 - b1)
+				/*pt := pinf - 2*float32(u)*b2/(1-b2)
+				if pt > 4 {
+					if v == 0 {
+						v = 1e-8
+					}
+					lt := float32(math.Sqrt(float64((1 - b2) / v)))
+					rt := float32(math.Sqrt(float64(((pt - 4) * (pt - 2) * pinf) / ((pinf - 4) * (pinf - 2) * pt))))
+					if math.IsNaN(float64(lt)) || math.IsInf(float64(lt), 0) {
+						panic(fmt.Errorf("lt is nan %f %f", lt, v))
+					}
+					if math.IsNaN(float64(rt)) || math.IsInf(float64(rt), 0) {
+						panic(fmt.Errorf("rt is nan %f", rt))
+					}
+					set.Weights[j].X[k] -= eta * rt * mhat * lt
+				} else {
+					set.Weights[j].X[k] -= eta * mhat
+				}*/
+				vhat := v / (1 - b2)
+				set.Weights[j].X[k] -= eta * mhat / (float32(math.Sqrt(float64(vhat))) + 1e-8)
+			}
+		}
+		total /= BatchSize
+		if !reduced && total < .5 {
+			reduced = true
+			//eta *= .1
+		}
+		end := time.Since(start)
+		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
+		fmt.Println(t.Head, i, total, end)
+		set.Zero()
+		others.Zero()
+		total = 0
+		start = time.Now()
 
 		if halt || math.IsNaN(float64(total)) {
 			fmt.Println(total)
 			break
 		}
-		if i%1000 == 0 {
+		if batch%10 == 0 {
 			set.Save(fmt.Sprintf("%d_%d_set.w", t.Head, i), total, i)
 		}
-		i++
+		batch++
 	}
 
 	p := plot.New()
