@@ -56,7 +56,7 @@ func CreateFunctions(dummy bool) *Functions {
 	f.FHadamard = tf32.B(f.Hadamard)
 	f.FSigmoid = tf32.U(f.Sigmoid)
 	f.FSumRows = tf32.U(f.SumRows)
-	f.FSoftmax = tf32.U(f.Softmax1)
+	f.FSoftmax = tf32.U(f.Softmax1Big)
 	f.FT = tf32.U(f.T)
 	f.FSoftmax0 = tf32.U(f.Softmax0)
 	f.FRelu = tf32.U(f.ReLu)
@@ -278,7 +278,7 @@ func (f *Functions) Softmax0(k tf32.Continuation, node int, a *tf32.V) bool {
 	return false
 }
 
-// Softmax is the softmax function
+// Softmax1 is the softmax function
 func (f *Functions) Softmax1(k tf32.Continuation, node int, a *tf32.V) bool {
 	c, size, width := tf32.NewV(a.S...), len(a.X), a.S[0]
 	cached := f.Get(node)
@@ -302,6 +302,44 @@ func (f *Functions) Softmax1(k tf32.Continuation, node int, a *tf32.V) bool {
 			}
 			for j, cx := range c.X[i : i+width] {
 				c.X[i+j] = cx / sum
+			}
+		}
+	}
+	f.Set(node, c.X)
+	if k(&c) {
+		return true
+	}
+	for i, d := range c.D {
+		cx := c.X[i]
+		a.D[i] += d * (cx - cx*cx)
+	}
+	return false
+}
+
+// Softmax1Big is the softmax function for big numbers
+func (f *Functions) Softmax1Big(k tf32.Continuation, node int, a *tf32.V) bool {
+	c, size, width := tf32.NewV(a.S...), len(a.X), a.S[0]
+	cached := f.Get(node)
+	if cached != nil {
+		c.X = cached
+	}
+	if cached == nil {
+		max := float32(0)
+		for _, v := range a.X {
+			if v > max {
+				max = v
+			}
+		}
+		max *= .9
+		values := make([]float64, width)
+		for i := 0; i < size; i += width {
+			sum := 0.0
+			for j, ax := range a.X[i : i+width] {
+				values[j] = math.Exp(float64(ax - max))
+				sum += values[j]
+			}
+			for _, cx := range values {
+				c.X = append(c.X, float32(cx/sum))
 			}
 		}
 	}
