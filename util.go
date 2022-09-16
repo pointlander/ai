@@ -292,7 +292,7 @@ func (f *Functions) Softmax1(k tf32.Continuation, node int, a *tf32.V) bool {
 				max = v
 			}
 		}
-		max *= .9
+		max *= .99
 		for i := 0; i < size; i += width {
 			sum := float32(0.0)
 			for _, ax := range a.X[i : i+width] {
@@ -330,7 +330,7 @@ func (f *Functions) Softmax1Big(k tf32.Continuation, node int, a *tf32.V) bool {
 				max = v
 			}
 		}
-		max *= .9
+		max *= .99
 		values := make([]float64, width)
 		for i := 0; i < size; i += width {
 			sum := 0.0
