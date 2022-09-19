@@ -16,6 +16,11 @@ import (
 	"github.com/pointlander/gradient/tf32"
 )
 
+const (
+	// S is the scaling factor for the softmax
+	S = 1.0 - 1e-9
+)
+
 // Functions are functions for neural networks
 type Functions struct {
 	tf32.Context
@@ -292,7 +297,7 @@ func (f *Functions) Softmax1(k tf32.Continuation, node int, a *tf32.V) bool {
 				max = v
 			}
 		}
-		max *= .99
+		max *= S
 		for i := 0; i < size; i += width {
 			sum := float32(0.0)
 			for _, ax := range a.X[i : i+width] {
@@ -330,12 +335,12 @@ func (f *Functions) Softmax1Big(k tf32.Continuation, node int, a *tf32.V) bool {
 				max = v
 			}
 		}
-		max *= .99
+		s := float64(max) * S
 		values := make([]float64, width)
 		for i := 0; i < size; i += width {
 			sum := 0.0
 			for j, ax := range a.X[i : i+width] {
-				values[j] = math.Exp(float64(ax - max))
+				values[j] = math.Exp(float64(ax) - s)
 				sum += values[j]
 			}
 			for _, cx := range values {
