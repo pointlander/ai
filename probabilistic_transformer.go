@@ -407,6 +407,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	// 8957 10000 Subtract max*s from exponent
 	// 9026 10000 more training
 	// 9044 10000 more training: 119168 cycles
+	// 9000 10000 more training: 121728 cycles
 	fmt.Println(NumSets, NumDescents)
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()

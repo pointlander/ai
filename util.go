@@ -18,7 +18,7 @@ import (
 
 const (
 	// S is the scaling factor for the softmax
-	S = 1.0 - 1e-9
+	S = 1.0 - 1e-300
 )
 
 // Functions are functions for neural networks
