@@ -28,7 +28,7 @@ const (
 	// BatchSize is the size of a batch
 	BatchSize = 128
 	// CPUSPerSet is the number of CPUs per set
-	CPUSPerSet = 32
+	CPUSPerSet = 64
 	// B1 exponential decay of the rate for the first moment estimates
 	B1 = 0.9
 	// B2 exponential decay rate for the second-moment estimates

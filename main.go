@@ -98,7 +98,7 @@ func main() {
 			t := Configuration{
 				HeadType:   HeadTypeReZero,
 				Head:       i,
-				HiddenSize: 64,
+				HiddenSize: 128,
 				Attention:  SimpleAttention,
 				Swap:       false,
 			}
@@ -138,7 +138,7 @@ func main() {
 		} else {
 			t := Configuration{
 				HeadType:   HeadTypeReZero,
-				HiddenSize: 64,
+				HiddenSize: 128,
 				Attention:  SimpleAttention,
 				Swap:       false,
 			}
