@@ -690,11 +690,11 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 			break
 		}
 		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
-		total = 0
 
 		if batch%10 == 0 {
 			set.Save(fmt.Sprintf("%d_%d_set.w", t.Head, i), total, i)
 		}
+		total = 0
 		batch++
 	}
 
