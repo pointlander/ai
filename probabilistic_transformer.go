@@ -28,7 +28,7 @@ const (
 	// BatchSize is the size of a batch
 	BatchSize = 128
 	// CPUSPerSet is the number of CPUs per set
-	CPUSPerSet = 8
+	CPUSPerSet = 64
 	// B1 exponential decay of the rate for the first moment estimates
 	B1 = 0.9
 	// B2 exponential decay rate for the second-moment estimates
@@ -414,7 +414,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	if err != nil {
 		panic(err)
 	}
-	width, size := 16, 49+1
+	width, size := 256, 28*28
 	selections := make([]Position, size-1)
 	for i := range selections {
 		selections[i].Positions = make([]int, width)
@@ -576,11 +576,14 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 			/*for j := 0; j < width; j++ {
 				inputs.X[j] = 1
 			}*/
-			for j, set := range selections {
+			/*for j, set := range selections {
 				for i, value := range set.Positions {
 					inputs.X[(j+1)*width+i] =
 						float32(image[value]) / 255
 				}
+			}*/
+			for i, value := range image {
+				inputs.X[i*256+int(value)] = 1
 			}
 			outputs.X[int(images.Train.Labels[index])] = 1
 
@@ -687,11 +690,11 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 			break
 		}
 		points = append(points, plotter.XY{X: float64(i), Y: float64(total)})
-		total = 0
 
 		if batch%10 == 0 {
 			set.Save(fmt.Sprintf("%d_%d_set.w", t.Head, i), total, i)
 		}
+		total = 0
 		batch++
 	}
 
@@ -876,7 +879,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 	if err != nil {
 		panic(err)
 	}
-	width, size := 16, 49+1
+	width, size := 256, 28*28
 	type Voter struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V
@@ -933,10 +936,13 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		/*for j := 0; j < width; j++ {
 			head.Inputs.X[j] = 1
 		}*/
-		for j, set := range voter.Selections {
+		/*for j, set := range voter.Selections {
 			for i, value := range set.Positions {
 				voter.Inputs.X[(j+1)*width+i] = float32(image[value]) / 255
 			}
+		}*/
+		for i, value := range image {
+			voter.Inputs.X[i*256+int(value)] = 1
 		}
 
 		f.Clear()

@@ -9,8 +9,12 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
+	"sort"
+	"strings"
 
 	"github.com/ALTree/bigfloat"
+	"github.com/pointlander/gradient/tf32"
 )
 
 var (
@@ -32,6 +36,8 @@ var (
 	FlagTest = flag.Int("test", -1, "test mode")
 	// FlagHeads is a flag to set the number of heads
 	FlagHeads = flag.Int("heads", 1, "number of heads")
+	// Print cost
+	FlagCost = flag.Bool("cost", false, "print cost")
 )
 
 func main() {
@@ -92,19 +98,51 @@ func main() {
 			t := Configuration{
 				HeadType:   HeadTypeReZero,
 				Head:       i,
-				HiddenSize: 64,
+				HiddenSize: 128,
 				Attention:  SimpleAttention,
 				Swap:       false,
 			}
 			t.ProbabilisticTransformerParallel()
 		}
 	} else if *FlagName != "" {
-		t := Configuration{
-			HeadType:   HeadTypeReZero,
-			HiddenSize: 64,
-			Attention:  SimpleAttention,
-			Swap:       false,
+		if *FlagCost {
+			type Cost struct {
+				Epoch int
+				Cost  float32
+			}
+			costs := make([]Cost, 0, 8)
+			entries, err := os.ReadDir(".")
+			if err != nil {
+				panic(err)
+			}
+			for _, entry := range entries {
+				name := entry.Name()
+				if strings.HasSuffix(name, *FlagName) {
+					set := tf32.NewSet()
+					cost, epoch, err := set.Open(name)
+					if err != nil {
+						panic(err)
+					}
+					costs = append(costs, Cost{
+						Epoch: epoch,
+						Cost:  cost,
+					})
+				}
+			}
+			sort.Slice(costs, func(i, j int) bool {
+				return costs[i].Epoch < costs[j].Epoch
+			})
+			for _, cost := range costs {
+				fmt.Println(cost.Epoch, cost.Cost)
+			}
+		} else {
+			t := Configuration{
+				HeadType:   HeadTypeReZero,
+				HiddenSize: 128,
+				Attention:  SimpleAttention,
+				Swap:       false,
+			}
+			t.InferenceProbabilisticTransformerParallel(*FlagHeads, *FlagTest, *FlagName)
 		}
-		t.InferenceProbabilisticTransformerParallel(*FlagHeads, *FlagTest, *FlagName)
 	}
 }
