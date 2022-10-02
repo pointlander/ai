@@ -62,12 +62,8 @@ github.com/pointlander/datum/iris v0.0.0-20200802052503-0ee610caba95 h1:K9BmC+t1
 github.com/pointlander/datum/iris v0.0.0-20200802052503-0ee610caba95/go.mod h1:zlyed+Td2CpuOq/58UhB8/2grLv71oHWLY2CPscR+2w=
 github.com/pointlander/datum/mnist v0.0.0-20200802052503-0ee610caba95 h1:w8he3S59d2+lPD1zC/XjsEkt6LdXkeLZKJUFy7mN9c4=
 github.com/pointlander/datum/mnist v0.0.0-20200802052503-0ee610caba95/go.mod h1:JZkWBUy6wwx8zcKCr9uC+pkW5yqkPb5gXMtYkOAn/KE=
-github.com/pointlander/gradient v0.0.0-20220905004133-ed1f0783976e h1:KOjq9BcMyPzZMH1Hbi+KaJCP+NZhaM5NksedIHEZhM8=
-github.com/pointlander/gradient v0.0.0-20220905004133-ed1f0783976e/go.mod h1:gVxcVB9oJ9tPTLxBB4mLnZ7gQ3tRdkLxr0v7WPkahJ8=
-github.com/pointlander/gradient v0.0.0-20220905010707-1713b4a6e77d h1:KFDzaedc70m/RGTQOx0uD+zSolFOwhfd+PuQyFxjuWA=
-github.com/pointlander/gradient v0.0.0-20220905010707-1713b4a6e77d/go.mod h1:gVxcVB9oJ9tPTLxBB4mLnZ7gQ3tRdkLxr0v7WPkahJ8=
-github.com/pointlander/gradient v0.0.0-20220905025623-3ab65fe0da76 h1:s+rImNXMV3N3z/xbQQcfE1I9MJbpzCT9NaC1XBuJSKE=
-github.com/pointlander/gradient v0.0.0-20220905025623-3ab65fe0da76/go.mod h1:gVxcVB9oJ9tPTLxBB4mLnZ7gQ3tRdkLxr0v7WPkahJ8=
+github.com/pointlander/gradient v0.0.0-20220929203016-8b5ee7f5a788 h1:mFstuHQNmJ6QaFXkqyZPwgCFPykKZOGjf5LVnXZZ7vw=
+github.com/pointlander/gradient v0.0.0-20220929203016-8b5ee7f5a788/go.mod h1:gVxcVB9oJ9tPTLxBB4mLnZ7gQ3tRdkLxr0v7WPkahJ8=
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=
 github.com/ruudk/golang-pdf417 v0.0.0-20181029194003-1af4ab5afa58/go.mod h1:6lfFZQK844Gfx8o5WFuvpxWRwnSoipWe/p622j1v06w=
 github.com/ruudk/golang-pdf417 v0.0.0-20201230142125-a7e3863a1245/go.mod h1:pQAZKsJ8yyVxGRWYNEm9oFB8ieLgKFnamEyDmSA0BRk=

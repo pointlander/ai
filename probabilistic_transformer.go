@@ -28,7 +28,7 @@ const (
 	// BatchSize is the size of a batch
 	BatchSize = 128
 	// CPUSPerSet is the number of CPUs per set
-	CPUSPerSet = 64
+	CPUSPerSet = 8
 	// B1 exponential decay of the rate for the first moment estimates
 	B1 = 0.9
 	// B2 exponential decay rate for the second-moment estimates
@@ -52,11 +52,6 @@ type (
 		Attention  Attention
 		Swap       bool
 	}
-	// Adam is an adam state
-	Adam struct {
-		M float32
-		V float32
-	}
 )
 
 const (
@@ -64,6 +59,15 @@ const (
 	HeadTypeRegular HeadType = iota
 	// HeadTypeReZero is the ReZero head type
 	HeadTypeReZero
+)
+
+const (
+	// StateM is the state for the mean
+	StateM = iota
+	// StateV is the state for the variance
+	StateV
+	// StateTotal is the total number of states
+	StateTotal
 )
 
 var (
@@ -414,8 +418,8 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	if err != nil {
 		panic(err)
 	}
-	width, size := 256, 28*28
-	selections := make([]Position, size-1)
+	width, size := 16, 49
+	selections := make([]Position, size)
 	for i := range selections {
 		selections[i].Positions = make([]int, width)
 	}
@@ -487,16 +491,28 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	for _, w := range set.Weights {
 		if strings.HasPrefix(w.N, "a") || strings.HasPrefix(w.N, "b") {
 			w.X = w.X[:cap(w.X)]
+			w.States = make([][]float32, StateTotal)
+			for i := range w.States {
+				w.States[i] = make([]float32, len(w.X))
+			}
 			continue
 		} else if strings.HasPrefix(w.N, "n") {
 			for i := 0; i < cap(w.X); i++ {
 				w.X = append(w.X, 1)
+			}
+			w.States = make([][]float32, StateTotal)
+			for i := range w.States {
+				w.States[i] = make([]float32, len(w.X))
 			}
 			continue
 		}
 		factor := math.Sqrt(2.0 / float64(w.S[0]))
 		for i := 0; i < cap(w.X); i++ {
 			w.X = append(w.X, float32(rnd.NormFloat64()*factor))
+		}
+		w.States = make([][]float32, StateTotal)
+		for i := range w.States {
+			w.States[i] = make([]float32, len(w.X))
 		}
 	}
 
@@ -519,11 +535,6 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 		others.ByName["alpha"].X[0] = 0.01
 		processes[i].others = others
 		processes[i].set = set.Copy()
-	}
-
-	adam := make([][]Adam, 0, 8)
-	for _, p := range set.Weights {
-		adam = append(adam, make([]Adam, len(p.X)))
 	}
 
 	for i := range processes {
@@ -573,17 +584,11 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 				outputs.X[j] = 0
 			}
 
-			/*for j := 0; j < width; j++ {
-				inputs.X[j] = 1
-			}*/
-			/*for j, set := range selections {
+			for j, set := range selections {
 				for i, value := range set.Positions {
-					inputs.X[(j+1)*width+i] =
+					inputs.X[j*width+i] =
 						float32(image[value]) / 255
 				}
-			}*/
-			for i, value := range image {
-				inputs.X[i*256+int(value)] = 1
 			}
 			outputs.X[int(images.Train.Labels[index])] = 1
 
@@ -648,10 +653,10 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 				_ = alpha
 				//set.Weights[j].X[k] -= eta * gradients[j][k] / BatchSize * scaling
 				g := d / BatchSize
-				m := B1*adam[j][k].M + (1-B1)*g
-				v := B2*adam[j][k].V + (1-B2)*g*g
-				adam[j][k].M = m
-				adam[j][k].V = v
+				m := B1*w.States[StateM][k] + (1-B1)*g
+				v := B2*w.States[StateV][k] + (1-B2)*g*g
+				w.States[StateM][k] = m
+				w.States[StateV][k] = v
 				mhat := m / (1 - b1)
 				/*pt := pinf - 2*float32(u)*b2/(1-b2)
 				if pt > 4 {
@@ -879,7 +884,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 	if err != nil {
 		panic(err)
 	}
-	width, size := 256, 28*28
+	width, size := 16, 49
 	type Voter struct {
 		Head       tf32.Meta
 		Inputs     *tf32.V
@@ -889,7 +894,7 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 	voters := make([]Voter, h)
 	for i := range voters {
 		rnd := rand.New(rand.NewSource(int64(i + 1)))
-		selections := make([]Position, size-1)
+		selections := make([]Position, size)
 		for i := range selections {
 			selections[i].Positions = make([]int, width)
 		}
@@ -936,13 +941,10 @@ func (t Configuration) InferenceProbabilisticTransformerParallel(h, test int, na
 		/*for j := 0; j < width; j++ {
 			head.Inputs.X[j] = 1
 		}*/
-		/*for j, set := range voter.Selections {
+		for j, set := range voter.Selections {
 			for i, value := range set.Positions {
-				voter.Inputs.X[(j+1)*width+i] = float32(image[value]) / 255
+				voter.Inputs.X[j*width+i] = float32(image[value]) / 255
 			}
-		}*/
-		for i, value := range image {
-			voter.Inputs.X[i*256+int(value)] = 1
 		}
 
 		f.Clear()

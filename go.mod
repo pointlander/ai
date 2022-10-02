@@ -7,7 +7,7 @@ require (
 	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12
 	github.com/pointlander/datum/iris v0.0.0-20200802052503-0ee610caba95
 	github.com/pointlander/datum/mnist v0.0.0-20200802052503-0ee610caba95
-	github.com/pointlander/gradient v0.0.0-20220905025623-3ab65fe0da76
+	github.com/pointlander/gradient v0.0.0-20220929203016-8b5ee7f5a788
 	gonum.org/v1/plot v0.11.0
 )
 
