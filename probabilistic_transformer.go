@@ -412,6 +412,7 @@ func (t Configuration) ProbabilisticTransformerParallel() {
 	// 9026 10000 more training
 	// 9044 10000 more training: 119168 cycles
 	// 9000 10000 more training: 121728 cycles
+	// 9319 10000: 114048 cycles
 	fmt.Println(NumSets, NumDescents)
 	rnd := rand.New(rand.NewSource(int64(t.Head + 1)))
 	images, err := mnist.Load()
