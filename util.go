@@ -39,6 +39,7 @@ type Functions struct {
 	FSoftmax     func(a tf32.Meta) tf32.Meta
 	FT           func(a tf32.Meta) tf32.Meta
 	FSoftmax0    func(a tf32.Meta) tf32.Meta
+	FClamp       func(a tf32.Meta) tf32.Meta
 	FRelu        func(a tf32.Meta) tf32.Meta
 	FNorm        func(a tf32.Meta) tf32.Meta
 	FHadamard0   func(a, b tf32.Meta) tf32.Meta
@@ -64,6 +65,7 @@ func CreateFunctions(dummy bool) *Functions {
 	f.FSoftmax = tf32.U(f.Softmax1Big)
 	f.FT = tf32.U(f.T)
 	f.FSoftmax0 = tf32.U(f.Softmax0)
+	f.FClamp = tf32.U(f.Clamp1Big)
 	f.FRelu = tf32.U(f.ReLu)
 	f.FNorm = tf32.U(f.Normalize)
 	f.FHadamard0 = tf32.B(f.Hadamard0)
@@ -86,7 +88,7 @@ func RegularAttention(f *Functions, query, key, value, dk tf32.Meta) tf32.Meta {
 // SimpleAttention implements the attention mechanism described in
 // https://openreview.net/forum?id=pW--cu2FCHY
 func SimpleAttention(f *Functions, query, key, value, dk tf32.Meta) tf32.Meta {
-	return f.FHadamard(f.FSigmoid(query), f.FSumRows(f.FHadamard(f.FSoftmax(key), value)))
+	return f.FHadamard(f.FSigmoid(query), f.FSumRows(f.FHadamard(f.FSoftmax(f.FClamp(key)), value)))
 }
 
 // IdentityAttention implements an identity attention
@@ -335,9 +337,9 @@ func (f *Functions) Softmax1Big(k tf32.Continuation, node int, a *tf32.V) bool {
 				max = v
 			}
 		}
-		s := float64(max) * S
 		values := make([]float64, width)
 		for i := 0; i < size; i += width {
+			s := float64(max) * S
 			sum := 0.0
 			for j, ax := range a.X[i : i+width] {
 				values[j] = math.Exp(float64(ax) - s)
@@ -355,6 +357,54 @@ func (f *Functions) Softmax1Big(k tf32.Continuation, node int, a *tf32.V) bool {
 	for i, d := range c.D {
 		cx := c.X[i]
 		a.D[i] += d * (cx - cx*cx)
+	}
+	return false
+}
+
+// Clamp1Big is the clamp function for big numbers
+func (f *Functions) Clamp1Big(k tf32.Continuation, node int, a *tf32.V) bool {
+	c, size, width := tf32.NewV(a.S...), len(a.X), a.S[0]
+	cached := f.Get(node)
+	if cached != nil {
+		c.X = cached
+	}
+	if cached == nil {
+		max := float32(0)
+		for _, v := range a.X {
+			if v > max {
+				max = v
+			}
+		}
+		for i := 0; i < size; i += width {
+			s := float64(max) * S
+			for _, ax := range a.X[i : i+width] {
+				if float64(ax)-s > 709 {
+					c.X = append(c.X, float32(s+709))
+				} else {
+					c.X = append(c.X, ax)
+				}
+			}
+		}
+	}
+	f.Set(node, c.X)
+	if k(&c) {
+		return true
+	}
+	max := float32(0)
+	for _, v := range a.X {
+		if v > max {
+			max = v
+		}
+	}
+	for i := 0; i < size; i += width {
+		s := float64(max) * S
+		for j, v := range a.X[i : i+width] {
+			if float64(v)-s > 709 {
+				a.D[i+j] += 0
+			} else {
+				a.D[i+j] += c.D[i+j]
+			}
+		}
 	}
 	return false
 }
