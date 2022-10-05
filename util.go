@@ -331,14 +331,14 @@ func (f *Functions) Softmax1Big(k tf32.Continuation, node int, a *tf32.V) bool {
 		c.X = cached
 	}
 	if cached == nil {
+		max := float32(0)
+		for _, v := range a.X {
+			if v > max {
+				max = v
+			}
+		}
 		values := make([]float64, width)
 		for i := 0; i < size; i += width {
-			max := float32(0)
-			for _, v := range a.X[i : i+width] {
-				if v > max {
-					max = v
-				}
-			}
 			s := float64(max) * S
 			sum := 0.0
 			for j, ax := range a.X[i : i+width] {
@@ -369,13 +369,13 @@ func (f *Functions) Clamp1Big(k tf32.Continuation, node int, a *tf32.V) bool {
 		c.X = cached
 	}
 	if cached == nil {
-		for i := 0; i < size; i += width {
-			max := float32(0)
-			for _, v := range a.X[i : i+width] {
-				if v > max {
-					max = v
-				}
+		max := float32(0)
+		for _, v := range a.X {
+			if v > max {
+				max = v
 			}
+		}
+		for i := 0; i < size; i += width {
 			s := float64(max) * S
 			for _, ax := range a.X[i : i+width] {
 				if float64(ax)-s > 709 {
@@ -390,13 +390,13 @@ func (f *Functions) Clamp1Big(k tf32.Continuation, node int, a *tf32.V) bool {
 	if k(&c) {
 		return true
 	}
-	for i := 0; i < size; i += width {
-		max := float32(0)
-		for _, v := range a.X[i : i+width] {
-			if v > max {
-				max = v
-			}
+	max := float32(0)
+	for _, v := range a.X {
+		if v > max {
+			max = v
 		}
+	}
+	for i := 0; i < size; i += width {
 		s := float64(max) * S
 		for j, v := range a.X[i : i+width] {
 			if float64(v)-s > 709 {
